@@ -1,8 +1,12 @@
 import json
 from json import decoder
+from threading import Lock, Thread
+from ratelimit import limits, sleep_and_retry
 import click
 import functools
-import threading
+import _thread as thread
+import queue
+import time
 import numpy as npy
 from bscscan import BscScan
 from dbj import dbj
@@ -11,129 +15,16 @@ from timeit import default_timer as timer
 # from chatterbot.trainers import ChatterBotCorpusTrainer
 
 # region temp workaround
+APICALLS = 4
+TIMESCALE = 1
 
 
-def get_bep20_token_transfer_events_by_address(address: str, startblock: int, endblock: int, sort: str):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
-        result = {}
-        except_lim = 0
-        #! stop only at three exceptions in a row to compensate the breaking of the workflow by timeout
-        while except_lim < 3:
-            try:
-                result = bsc.get_bep20_token_transfer_events_by_address(
-                    address, startblock, endblock, sort)
-            except Exception:
-                except_lim += 1
-                continue
-            break
-        if not result:
-            raise NotImplementedError
-    return result
+@sleep_and_retry
+@limits(calls=APICALLS, period=TIMESCALE)
+def check_API_limit():
+    'Solution by Kjetil Svenheim - https://stackoverflow.com/questions/40748687/python-api-rate-limiting-how-to-limit-api-calls-globally'
+    return
 
-
-def get_proxy_transaction_by_hash(txhash: str):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
-        result = {}
-        except_lim = 0
-        #! stop only at three exceptions in a row to compensate the breaking of the workflow by timeout
-        while except_lim < 3:
-            try:
-                result = bsc.get_proxy_transaction_by_hash(txhash)
-            except Exception:
-                except_lim += 1
-                continue
-            break
-        if not result:
-            raise NotImplementedError
-    return result
-
-
-def get_proxy_transaction_receipt(txhash: str):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
-        result = {}
-        except_lim = 0
-        #! stop only at three exceptions in a row to compensate the breaking of the workflow by timeout
-        while except_lim < 3:
-            try:
-                result = bsc.get_proxy_transaction_receipt(txhash)
-            except Exception:
-                except_lim += 1
-                continue
-            break
-        if not result:
-            raise NotImplementedError
-    return result
-
-
-def get_bep20_token_transfer_events_by_address_and_contract_paginated(contract_address: str, address: str, page: int, offset: int, sort: str):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
-        result = {}
-        except_lim = 0
-        #! stop only at three exceptions in a row to compensate the breaking of the workflow by timeout
-        while except_lim < 3:
-            try:
-                result = bsc.get_bep20_token_transfer_events_by_address_and_contract_paginated(
-                    contract_address, address, page, offset, sort)
-            except Exception:
-                except_lim += 1
-                continue
-            break
-        if not result:
-            raise NotImplementedError
-    return result
-
-
-def get_bep20_token_transfer_events_by_contract_address_paginated(contract_address: str, page: int, offset: int, sort: str):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
-        result = {}
-        except_lim = 0
-        #! stop only at three exceptions in a row to compensate the breaking of the workflow by timeout
-        while except_lim < 3:
-            try:
-                result = bsc.get_bep20_token_transfer_events_by_contract_address_paginated(
-                    contract_address, page, offset, sort)
-            except Exception:
-                except_lim += 1
-                continue
-            break
-        if not result:
-            raise NotImplementedError
-    return result
-
-
-def get_proxy_block_number():
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
-        result = {}
-        except_lim = 0
-        #! stop only at three exceptions in a row to compensate the breaking of the workflow by timeout
-        while except_lim < 3:
-            try:
-                result = bsc.get_proxy_block_number()
-            except Exception:
-                except_lim += 1
-                continue
-            break
-        if not result:
-            raise NotImplementedError
-    return result
-
-
-def get_acc_balance_by_token_contract_address(contract_address: str, address: str):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
-        result = {}
-        except_lim = 0
-        #! stop only at three exceptions in a row to compensate the breaking of the workflow by timeout
-        while except_lim < 3:
-            try:
-                result = bsc.get_acc_balance_by_token_contract_address(
-                    contract_address, address)
-            except Exception:
-                except_lim += 1
-                continue
-            break
-        if not result:
-            raise NotImplementedError
-    return result
 
 # endregion
 
@@ -163,12 +54,10 @@ dead_addresses = [
 # endregion
 
 
-def get_token_information(contract=''):
-    if contract_db.exists(contract):
+def parse_token_information_from_tx(data):
+    if contract_db.exists(data[0]['contractAddress']):
         'already in database'
     else:
-        data = get_bep20_token_transfer_events_by_contract_address_paginated(
-            contract, 1, 1, 'asc')
         ca = data[0]['contractAddress']
         name = data[0]['tokenName']
         sym = data[0]['tokenSymbol']
@@ -178,98 +67,138 @@ def get_token_information(contract=''):
         ''
 
 
-def get_tokenbalance_by_address(addresses=[], contract=''):
-    if isinstance(addresses, list):
-        addresses_and_tokenbalance = []
-        for address in addresses:
-            balance = get_acc_balance_by_token_contract_address(
-                contract, address)
-            addresses_and_tokenbalance.append(
-                {'address': address, 'balance': balance})
-        return addresses_and_tokenbalance
-    else:
-        balance = get_acc_balance_by_token_contract_address(
-            contract, addresses)
-        return balance
+def recursive_search_by_address_and_contract(addresses=[], contract='', direction='', threads=4):
 
-
-def recursive_search_by_address_and_contract(addresses, contract, direction):
     # TODO: check, if addresses in a queue are better to handle
     #! move queue into main program, allows for-address-loop to be in iter func, reducing complexity in retrieve func
     #! possibly no recursive structure needed with queue: <repeat iter next wallet -> add queue>
-    next = retrieve_transactions_by_address_and_contract(
-        addresses, contract, direction)
-    if next:
-        recursive_search_by_address_and_contract(next, contract, direction)
-    ''
+    #safeprint = thread.allocate_lock()
 
-
-def retrieve_transactions_by_address_and_contract(addresses, contract, direction="<>"):
-    outgoing_wallets = []
-    incoming_wallets = []
     for address in addresses:
-        if not wallet_db.find('address == "' + str(address) + '"'):
-            tx_id_collection = []
-            transactions = []
-            page = 1
-            number_of_records = 10000  # max
-            sort = 'asc'
+        crawler_queue.put(address)
 
-            # TODO: find a way to get above a 20k limit
-            #! startblk = get_bep20_token_transfer_events_by_address_and_contract_paginated(contract, address, page, 1, 'asc)
-            #! endblk = get_bep20_token_transfer_events_by_address_and_contract_paginated(contract, address, page, 1, 'desc)
-            #! use creation block of token as starting point, get_proxy_block_by_number from there by blocksize +1
-            #! use latest tx block as end point
-            #! store whole blocks in db and filter/dbfind by contract, then dbgetmany
-            while True:
-                ini_len = len(transactions)
-                transactions.extend(get_bep20_token_transfer_events_by_address_and_contract_paginated(
-                    contract, address, page, number_of_records, sort))
-                length_diff = len(transactions) - ini_len
-                if length_diff < number_of_records or len(transactions) == 20000:
-                    break
-                if len(transactions) == 10000:
-                    # * limit of 10k can be circumvented by changing sort order (max 20k)
-                    sort = 'desc'
-                    page = 1
-                else:
-                    page += 1
+    for i in range(threads):
+        t = thread.start_new_thread(
+            retrieve_transactions_by_address_and_contract, (contract, direction))
+        crawler_threads.append(t)
 
-            balance = get_tokenbalance_by_address(address, contract)
+    # while len(running_threads) > 0:
+    #    pass
 
-            for transaction in transactions:
-                entry = extract_transaction_data_from_transfer_event(
-                    contract, transaction)
-                name = create_checksum(entry)
-
-                if not tx_db.exists(name):
-                    tx_db.insert(entry, name)
-
-                if entry['sender'] == address and entry['recipient'] != address:
-                    if entry['recipient'] not in swap_addresses:
-                        outgoing_wallets.append(entry['recipient'])
-                if entry['sender'] != address and entry['recipient'] == address:
-                    if entry['sender'] not in swap_addresses:
-                        incoming_wallets.append(entry['sender'])
-
-                tx_id_collection.append(name)
-            wallet = {'address': address, 'balance': balance,
-                      'tx_ids': tx_id_collection}
-            wallet_db.insert(wallet, address)
-        ''
-    if direction == '<':
-        return incoming_wallets
-    if direction == '>':
-        return outgoing_wallets
-    if direction == '<>' or direction == '':
-        # TODO: find a better way to handle this
-        all_wallets = incoming_wallets
-        all_wallets.extend(outgoing_wallets)
-        return all_wallets
+    time.sleep(60)
+    crawler_queue.join()
     ''
 
 
-def extract_transaction_data_from_transfer_event(contract, transaction):
+def retrieve_transactions_by_address_and_contract(contract='', direction=""):
+    # TODO: determine if processing and API access should be separated further for better performance
+    #! currently the thread provides work for itself. maybe another model will be more useful
+    # ? saparate workers for: getting txdata; processing txdata; assembling walletdata
+    with BscScan(api_key=api_key, asynchronous=False) as bsc:
+        outgoing_wallets = []
+        incoming_wallets = []
+        while True:
+            try:
+                address = crawler_queue.get(block=True, timeout=60)
+
+                exists = wallet_db.exists(address)
+                if not exists:
+                    outgoing_wallets.clear()
+                    incoming_wallets.clear()
+                    tx_id_collection = []
+                    transactions = []
+                    page = 1
+                    number_of_records = 10000  # max
+                    sort = 'asc'
+
+                    # TODO: find a way to get above a 20k limit
+                    #! startblk = get_bep20_token_transfer_events_by_address_and_contract_paginated(contract, address, page, 1, 'asc)
+                    #! endblk = get_bep20_token_transfer_events_by_address_and_contract_paginated(contract, address, page, 1, 'desc)
+                    #! use creation block of token as starting point, get_proxy_block_by_number from there by blocksize +1
+                    #! use latest tx block as end point
+                    #! store whole blocks in db and filter/dbfind by contract, then dbgetmany
+                    while True:
+
+                        queryresult = {}
+                        exceptions = []
+                        while len(exceptions) < 3:
+                            try:
+                                check_API_limit()
+                                queryresult = bsc.get_bep20_token_transfer_events_by_address_and_contract_paginated(
+                                    contract, address, page, number_of_records, sort)
+                            except Exception as e:
+                                exceptions.append(e)
+                                continue
+                            break
+                        if not queryresult:
+                            raise exceptions.pop()
+                        else:
+                            exceptions.clear()
+
+                        transactions.extend(queryresult)
+                        if len(queryresult) < number_of_records or len(transactions) == 20000:
+                            break
+                        if len(transactions) == 10000:
+                            # * limit of 10k can be circumvented by changing sort order (max 20k)
+                            sort = 'desc'
+                            page = 1
+                        else:
+                            page += 1
+
+                    while len(exceptions) < 3:
+                        try:
+                            check_API_limit()
+                            balance = bsc.get_acc_balance_by_token_contract_address(
+                                contract, address)
+                        except Exception as e:
+                            exceptions.append(e)
+                            continue
+                        break
+                    if not balance:
+                        raise exceptions.pop()
+                    else:
+                        exceptions.clear()
+
+                    for transaction in transactions:
+                        entry = extract_transaction_data_from_transfer_event(
+                            contract, transaction)
+                        name = create_checksum(entry)
+
+                        if not tx_db.exists(name):
+                            tx_db.insert(entry, name)
+
+                        if entry['sender'] == address and entry['recipient'] != address:
+                            if entry['recipient'] not in swap_addresses:
+                                outgoing_wallets.append(entry['recipient'])
+                        if entry['sender'] != address and entry['recipient'] == address:
+                            if entry['sender'] not in swap_addresses:
+                                incoming_wallets.append(entry['sender'])
+
+                        tx_id_collection.append(name)
+
+                    wallet = {'address': address, 'balance': balance,
+                              'tx_ids': tx_id_collection}
+                    wallet_db.insert(wallet, address)
+
+            except queue.Empty:
+                crawler_threads.remove(thread.get_ident())
+                raise SystemExit
+            else:
+                if direction == '<':
+                    for result in incoming_wallets:
+                        crawler_queue.put(result)
+                if direction == '>':
+                    for result in outgoing_wallets:
+                        crawler_queue.put(result)
+                if direction == '<>' or direction == '':
+                    # TODO: find a better way to handle this
+                    all_wallets = incoming_wallets
+                    all_wallets.extend(outgoing_wallets)
+                    for result in all_wallets:
+                        crawler_queue.put(result)
+
+
+def extract_transaction_data_from_transfer_event(contract='', transaction=''):
     tx = transaction['hash']
     decimals = int(transaction['tokenDecimal'])
     amt = int(transaction['value'], base=10) / pow(10, decimals)
@@ -281,20 +210,45 @@ def extract_transaction_data_from_transfer_event(contract, transaction):
     return entry
 
 
-def follow_tokenflow_by_tx(transaction_hash='', direction='<>'):
-    receipt = get_proxy_transaction_receipt(transaction_hash)
-    contract_address = receipt['logs'][0]['address']
+def follow_tokenflow_by_address(address='', contract_address='', direction=''):
+    recursive_search_by_address_and_contract(
+        address, contract_address, direction)
+    ''
 
-    get_token_information(contract_address)
+
+def follow_tokenflow_by_tx(transaction_hash='', direction=''):
+    with BscScan(api_key=api_key, asynchronous=False) as bsc:
+        check_API_limit()
+        receipt = bsc.get_proxy_transaction_receipt(transaction_hash)
+        contract_address = receipt['logs'][0]['address']
+
+        if not contract_db.find('contract == "' + str(contract_address) + '"'):
+            check_API_limit()
+            data = bsc.get_bep20_token_transfer_events_by_contract_address_paginated(
+                contract_address, 1, 1, 'asc')
+            parse_token_information_from_tx(data)
+
     tx = extract_transaction_data_from_receipt(receipt, contract_address)
     addresses = (item['recipient'] for item in tx)
 
-    # TODO: remove if not needed
-    #endblock = get_proxy_block_number()
-    #startblock = int(receipt['blockNumber'], base=16)
-
     recursive_search_by_address_and_contract(
         addresses, contract_address, direction)
+    ''
+
+
+def follow_tokenflow(by='', contract_address='', tx='', addresses='', direction=''):
+    start = time.asctime()
+    print('Start: {} '.format(start))
+
+    if by == 'tx' and tx and direction:
+        follow_tokenflow_by_tx(transaction_hash=tx, direction=direction)
+        ''
+    if by == 'address' and addresses and contract_address and direction:
+        follow_tokenflow_by_address(
+            address=addresses, contract_address=contract_address, direction=direction)
+        ''
+    end = time.asctime()
+    print('End: {}'.format(end))
     ''
 
 
@@ -349,12 +303,17 @@ if __name__ == "__main__":
 
     clear_database()
 
+    crawler_queue = queue.Queue()
+    api_calls_queue = queue.Queue()
+    crawler_threads = []
+    #db_lock = Lock()
+
     # james()
-    start = timer()
-    follow_tokenflow_by_tx(
-        '0x923c70f540c703d1e942447ca28ef56e67ca2e575b79b3f780433c9f74b965d3', '<>')
-    end = timer()
-    elapsed = end - start
+    follow_tokenflow(
+        by='tx', tx='0x923c70f540c703d1e942447ca28ef56e67ca2e575b79b3f780433c9f74b965d3', direction='>')
+
+    tx_db.save()
+    wallet_db.save()
     ''
 
 
