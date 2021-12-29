@@ -67,7 +67,7 @@ def parse_token_information_from_tx(data):
         ''
 
 
-def recursive_search_by_address_and_contract(addresses=[], contract='', direction='', threads=4):
+def recursive_search_by_address_and_contract(addresses=[], contract='', direction='', threads=1):
 
     # TODO: check, if addresses in a queue are better to handle
     #! move queue into main program, allows for-address-loop to be in iter func, reducing complexity in retrieve func
@@ -82,11 +82,9 @@ def recursive_search_by_address_and_contract(addresses=[], contract='', directio
             retrieve_transactions_by_address_and_contract, (contract, direction))
         crawler_threads.append(t)
 
-    # while len(running_threads) > 0:
-    #    pass
+    while len(crawler_threads) > 0:
+        pass
 
-    time.sleep(60)
-    crawler_queue.join()
     ''
 
 
@@ -99,12 +97,12 @@ def retrieve_transactions_by_address_and_contract(contract='', direction=""):
         incoming_wallets = []
         while True:
             try:
-                address = crawler_queue.get(block=True, timeout=60)
+                address = crawler_queue.get(block=True, timeout=10)
+                outgoing_wallets.clear()
+                incoming_wallets.clear()
 
                 exists = wallet_db.exists(address)
                 if not exists:
-                    outgoing_wallets.clear()
-                    incoming_wallets.clear()
                     tx_id_collection = []
                     transactions = []
                     page = 1
@@ -211,6 +209,9 @@ def extract_transaction_data_from_transfer_event(contract='', transaction=''):
 
 
 def follow_tokenflow_by_address(address='', contract_address='', direction=''):
+    if not isinstance(address, list):
+        address = [address]
+
     recursive_search_by_address_and_contract(
         address, contract_address, direction)
     ''
@@ -236,16 +237,16 @@ def follow_tokenflow_by_tx(transaction_hash='', direction=''):
     ''
 
 
-def follow_tokenflow(by='', contract_address='', tx='', addresses='', direction=''):
+def follow_tokenflow(by='', contract_address='', tx='', address='', direction=''):
     start = time.asctime()
     print('Start: {} '.format(start))
 
     if by == 'tx' and tx and direction:
         follow_tokenflow_by_tx(transaction_hash=tx, direction=direction)
         ''
-    if by == 'address' and addresses and contract_address and direction:
+    if by == 'address' and address and contract_address and direction:
         follow_tokenflow_by_address(
-            address=addresses, contract_address=contract_address, direction=direction)
+            address=address, contract_address=contract_address, direction=direction)
         ''
     end = time.asctime()
     print('End: {}'.format(end))
@@ -310,7 +311,7 @@ if __name__ == "__main__":
 
     # james()
     follow_tokenflow(
-        by='tx', tx='0x923c70f540c703d1e942447ca28ef56e67ca2e575b79b3f780433c9f74b965d3', direction='>')
+        by='address', address='0x6c6c5a6bcc01200a09e0666d92a63e1df4218a5b', contract_address='0x09e2b83fe5485a7c8beaa5dffd1d324a2b2d5c13', direction='>')
 
     tx_db.save()
     wallet_db.save()
