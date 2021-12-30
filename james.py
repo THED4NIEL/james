@@ -1,13 +1,8 @@
-import json
-from json import decoder
-from threading import Lock, Thread
 from ratelimit import limits, sleep_and_retry
-import click
 import functools
 import _thread as thread
 import queue
 import time
-import numpy as npy
 from bscscan import BscScan
 from dbj import dbj
 from timeit import default_timer as timer
