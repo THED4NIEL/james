@@ -1,3 +1,4 @@
 bscscan_python==2.0.0
 dbj==0.1.10
 ratelimit==2.2.1
+requests==2.26.0
