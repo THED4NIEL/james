@@ -214,9 +214,10 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         highest_block = lowest_block = int(
             bep20_transactions[0]['blockNumber'])
         for transaction in bep20_transactions:
-            if not bep20_tx_db.exists(transaction['hash']):
+            id = create_checksum(transaction['hash'])
+            if not bep20_tx_db.exists(id):
                 bep20_tx_db.insert(
-                    transaction, transaction['hash'])
+                    transaction, id)
             if transaction['from'] == address and transaction['to'] != address:
                 if transaction['to'] not in donotfollow:
                     outgoing_wallets.add(
@@ -230,8 +231,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                 lowest_block = block
             if block > highest_block:
                 highest_block = block
-            bep20_tx_id_collection.append(
-                transaction['hash'])
+            bep20_tx_id_collection.append(id)
         ''
 
     def get_and_process_normal_transactions():
@@ -288,9 +288,9 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         # * check if tx is already indexed, if not, add to db
         # * crawl each transaction for receivers or senders and add them to the queue
         for transaction in native_transactions:
-            if not nat_tx_db.exists(transaction['hash']):
-                nat_tx_db.insert(
-                    transaction, transaction['hash'])
+            id = create_checksum(transaction['hash'])
+            if not nat_tx_db.exists(id):
+                nat_tx_db.insert(transaction, id)
 
             if transaction['from'] == address and transaction['to'] != address and followNative:
                 if transaction['to'] not in donotfollow:
@@ -301,7 +301,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                     incoming_wallets.add(
                         transaction['from'])
 
-            nat_tx_id_collection.append(transaction['hash'])
+            nat_tx_id_collection.append(id)
 
     if trackNative == trackBEP20 == False:
         raise Exception
@@ -336,7 +336,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                         get_and_process_normal_transactions()
 
                     wallet = {'address': address, 'bep20_tx_ids': bep20_tx_id_collection,
-                              'native_tx_ids': nat_tx_id_collection}
+                              'native_tx_ids': nat_tx_id_collection, 'children': list(outgoing_wallets), 'parents': list(incoming_wallets)}
                     wallet_db.insert(wallet, address)
 
             except queue.Empty:
@@ -359,10 +359,8 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                 incoming_wallets.clear()
 
 
-def create_checksum(item: dict):
-    checksum = functools.reduce(
-        lambda x, y: x ^ y, [hash(z) for z in item.items()])
-    hex_checksum = str(hex(checksum & 0xffffffff))
+def create_checksum(item: str):
+    hex_checksum = str(hex(hash(item) & 0xffffffff))
     return hex_checksum
 
 
