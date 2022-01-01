@@ -1,14 +1,15 @@
+from eth_typing.evm import Address
 from ratelimit import limits, sleep_and_retry
-import functools
+from web3 import Web3
 import _thread as thread
 import queue
 import time
-import re
 from enum import Enum
 from bscscan import BscScan
 from dbj import dbj
 from timeit import default_timer as timer
 from requests.structures import CaseInsensitiveDict
+from web3.main import Web3
 # from chatterbot import ChatBot
 # from chatterbot.trainers import ChatterBotCorpusTrainer
 
@@ -43,12 +44,6 @@ class SearchType(Enum):
 
 
 # region addresses
-tx_actions = CaseInsensitiveDict({
-    '0x7c025200': 'SWAP',
-    '0xdc056eff': 'SWAP',
-    '0x60806040': 'CONTRACT CREATION'
-})
-
 swap_addresses = CaseInsensitiveDict({
     '0x9f011e700fe3bd7004a8701a64517f2dc23f87dd': 'PCS ROUTER',
     '0xc590175e458b83680867afd273527ff58f74c02b': 'METAMASK ROUTER',
@@ -66,7 +61,6 @@ dead_addresses = CaseInsensitiveDict(
 
 donotfollow = CaseInsensitiveDict({})
 donotfollow.update(dead_addresses)
-donotfollow.update(swap_addresses)
 donotfollow.update(mint_addresses)
 
 # endregion
@@ -109,37 +103,29 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                         address))
                     check_API_limit()
                     source = bsc.get_contract_source_code(address)
+                    check_API_limit()
+                    bytecode = bsc.get_proxy_code_at(address)
                     if circulating > 0:
                         # * IS A TOKEN
                         is_contract = True
-                        if source[0]['SourceCode'] != '':
-                            sourcecode = source[0]['SourceCode']
-                            constructor = re.search(
-                                r'constructor\(\) public \{[\s\S]+?\}', sourcecode).group(0)
-                            name = re.search(
-                                r'name[\s*?]=[\s*?][\'\"](.*?)[\'\"];', constructor).group(1)
-                            symbol = re.search(
-                                r'symbol[\s*?]=[\s*?][\'\"](.*?)[\'\"];', constructor).group(1)
-                            decimals = re.search(
-                                r'decimal[s]?[\s*?]=[\s*?](.*?);', constructor).group(1)
-                        else:
-                            check_API_limit()
-                            data = bsc.get_bep20_token_transfer_events_by_contract_address_paginated(
-                                address, 1, 1, 'asc')
-                            name = data[0]['tokenName']
-                            symbol = data[0]['tokenSymbol']
-                            decimals = data[0]['tokenDecimal']
+
+                        check_API_limit()
+                        data = bsc.get_bep20_token_transfer_events_by_contract_address_paginated(
+                            address, 1, 1, 'asc')
+                        name = data[0]['tokenName']
+                        symbol = data[0]['tokenSymbol']
+                        decimals = data[0]['tokenDecimal']
 
                         token = {'contract': address, 'name': name,
-                                 'symbol': symbol, 'decimals': decimals, 'source': source}
+                                 'symbol': symbol, 'decimals': decimals, 'source': source, 'bytecode': bytecode}
                         token_db.insert(token, address)
                     else:
-                        # * IS NO TOKEN, BUT MAYBE A CONTRACT
+                        # * IS NO TOKEN, BUT MAY BE A CONTRACT
                         if source[0]['CompilerVersion'] != '':
                             # * CONTRACT CONFIRMED, SAVE FOR FURTHER CLASSIFICATION
                             first_tx = bsc.get_normal_txs_by_address_paginated(
                                 address, 0, 1, 0, 999999999, 'asc')
-                            entry = {'source': source,
+                            entry = {'source': source, 'bytecode': bytecode,
                                      'first_transaction': first_tx}
                             contract_db.insert(entry, address)
                             is_contract = True
@@ -168,6 +154,9 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         page = 1
         sort = 'asc'
         number_of_records = 10000  # max
+        exceptions = list()
+        bep20_transactions = list()
+        nonlocal highest_block, lowest_block, outgoing_wallets, incoming_wallets, bep20_tx_id_collection
 
         while True:
             # * Get transactions for BEP20 tokens
@@ -209,7 +198,6 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         # * process BEP20 transactions
         # * check if tx is already indexed, if not, add to db
         # * crawl each transaction for receivers or senders and add them to the queue
-        nonlocal highest_block, lowest_block
 
         highest_block = lowest_block = int(
             bep20_transactions[0]['blockNumber'])
@@ -238,7 +226,9 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         page = 1
         sort = 'asc'
         number_of_records = 10000  # max
-        nonlocal highest_block, lowest_block
+        exceptions = list()
+        native_transactions = list()
+        nonlocal highest_block, lowest_block, outgoing_wallets, incoming_wallets, nat_tx_id_collection
 
         # * Get native transactions
         while True:
@@ -275,9 +265,9 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                 exceptions.clear()
 
             native_transactions.extend(nat_tx_queryresult)
-            if len(nat_tx_queryresult) < number_of_records or len(bep20_transactions) == 20000:
+            if len(nat_tx_queryresult) < number_of_records or len(native_transactions) == 20000:
                 break
-            if len(bep20_transactions) == 10000:
+            if len(native_transactions) == 10000:
                 # * limit of 10k can be circumvented by changing sort order (max 20k)
                 sort = 'desc'
                 page = 1
@@ -287,6 +277,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         # * process native transactions
         # * check if tx is already indexed, if not, add to db
         # * crawl each transaction for receivers or senders and add them to the queue
+
         for transaction in native_transactions:
             id = create_checksum(transaction['hash'])
             if not nat_tx_db.exists(id):
@@ -313,7 +304,6 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         contract_provided = contract != ''
         outgoing_wallets = set()
         incoming_wallets = set()
-        exceptions = list()
         while True:
             try:
                 address = crawler_queue.get(block=True, timeout=30)
@@ -324,9 +314,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                 if not is_indb and not is_contract:
 
                     bep20_tx_id_collection = list()
-                    bep20_transactions = list()
                     nat_tx_id_collection = list()
-                    native_transactions = list()
                     lowest_block = int()
                     highest_block = int()
 
@@ -350,7 +338,6 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                     for result in outgoing_wallets:
                         crawler_queue.put(result)
                 if direction == Direction.ALL:
-                    # TODO: find a better way to handle this
                     all_wallets = set.union(incoming_wallets, outgoing_wallets)
                     for result in all_wallets:
                         crawler_queue.put(result)
@@ -379,26 +366,17 @@ def check_if_token(contract_address: str):
                         check_API_limit()
                         source = bsc.get_contract_source_code(contract_address)
                         is_token = True
-                        if source[0]['SourceCode'] != '':
-                            sourcecode = source[0]['SourceCode']
-                            constructor = re.search(
-                                r'constructor\(\) public \{[\s\S]+?\}', sourcecode).group(0)
-                            name = re.search(
-                                r'name[\s*?]=[\s*?][\'\"](.*?)[\'\"];', constructor).group(1)
-                            symbol = re.search(
-                                r'symbol[\s*?]=[\s*?][\'\"](.*?)[\'\"];', constructor).group(1)
-                            decimals = re.search(
-                                r'decimal[s]?[\s*?]=[\s*?](.*?);', constructor).group(1)
-                        else:
-                            check_API_limit()
-                            data = bsc.get_bep20_token_transfer_events_by_contract_address_paginated(
-                                contract_address, 1, 1, 'asc')
-                            name = data[0]['tokenName']
-                            symbol = data[0]['tokenSymbol']
-                            decimals = data[0]['tokenDecimal']
+                        check_API_limit()
+                        bytecode = bsc.get_proxy_code_at(contract_address)
+                        check_API_limit()
+                        data = bsc.get_bep20_token_transfer_events_by_contract_address_paginated(
+                            contract_address, 1, 1, 'asc')
+                        name = data[0]['tokenName']
+                        symbol = data[0]['tokenSymbol']
+                        decimals = data[0]['tokenDecimal']
 
                         token = {'contract': contract_address, 'name': name,
-                                 'symbol': symbol, 'decimals': decimals, 'source': source}
+                                 'symbol': symbol, 'decimals': decimals, 'source': source, 'bytecode': bytecode}
                         token_db.insert(token, contract_address)
                 except (ConnectionError, TimeoutError) as e:
                     exceptions.append(e)
@@ -446,10 +424,13 @@ def follow_tokenflow(by: SearchType, direction: Direction, trackBEP20: bool, tra
     print('Start: {} '.format(start))
 
     if by == SearchType.TX and tx and direction:
+        tx = tx.lower()
         follow_tokenflow_by_tx(transaction_hash=tx, direction=direction,
                                trackBEP20=trackBEP20, trackNative=trackNative, followNative=followNative)
         ''
     if by == SearchType.ADDR and address and contract and direction:
+        address = address.lower()
+        contract = contract.lower()
         if not isinstance(address, list):
             address = [address]
         follow_tokenflow_by_address(
@@ -488,6 +469,8 @@ if __name__ == "__main__":
     with open('api_key.txt', 'r') as file:
         api_key = file.read()
 
+    w3 = Web3()
+
     bep20_tx_db = dbj('.\\json_db\\bep20_tx_db.json', autosave=False)
     nat_tx_db = dbj('.\\json_db\\nat_tx_db.json', autosave=False)
     # tx_classification = dbj(
@@ -502,8 +485,8 @@ if __name__ == "__main__":
     threadlimit = 1
     crawler_queue = queue.Queue()
     crawler_threads = []
-    follow_tokenflow(
-        by=SearchType.ADDR, address='0xD063cCd39Fd9AaA759b77E5EA1e212B4288C7EFE', contract='0x09e2b83fe5485a7c8beaa5dffd1d324a2b2d5c13', direction=Direction.RIGHT, trackBEP20=True, trackNative=True, followNative=False)
+    # follow_tokenflow(
+    #     by=SearchType.ADDR, address='0xD063cCd39Fd9AaA759b77E5EA1e212B4288C7EFE', contract='0x09e2b83fe5485a7c8beaa5dffd1d324a2b2d5c13', direction=Direction.RIGHT, trackBEP20=True, trackNative=True, followNative=True)
     # follow_tokenflow(
     #    by=SearchType.TX, tx='0x470274cac1206acd765d61850aa65987818c7092de72529b827f27167ac33993', direction=Direction.RIGHT, trackBEP20=True, trackNative=True)
 
