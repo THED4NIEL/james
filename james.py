@@ -4,6 +4,7 @@ from web3 import Web3
 import _thread as thread
 import queue
 import time
+import os
 from enum import Enum
 from bscscan import BscScan
 from dbj import dbj
@@ -82,6 +83,7 @@ def recursive_search_by_address_and_contract(addresses: list, contract: str, dir
         crawler_threads.append(t)
 
     while len(crawler_threads) > 0:
+        time.sleep(1000)
         pass
 
     ''
@@ -92,8 +94,8 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         exceptions = []
         is_contract = False
 
-        is_token_in_db = token_db.exists(address)
-        is_contract_in_db = contract_db.exists(address)
+        is_token_in_db = tokenDB.exists(address)
+        is_contract_in_db = contractDB.exists(address)
 
         if is_token_in_db == is_contract_in_db == False:
             while len(exceptions) < 3:
@@ -118,7 +120,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
 
                         token = {'contract': address, 'name': name,
                                  'symbol': symbol, 'decimals': decimals, 'source': source, 'bytecode': bytecode}
-                        token_db.insert(token, address)
+                        tokenDB.insert(token, address)
                     else:
                         # * IS NO TOKEN, BUT MAY BE A CONTRACT
                         if source[0]['CompilerVersion'] != '':
@@ -127,7 +129,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                                 address, 0, 1, 0, 999999999, 'asc')
                             entry = {'source': source, 'bytecode': bytecode,
                                      'first_transaction': first_tx}
-                            contract_db.insert(entry, address)
+                            contractDB.insert(entry, address)
                             is_contract = True
                         else:
                             # * NO SIGNS OF A CONTRACT FOUND
@@ -135,6 +137,12 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                 except (ConnectionError, TimeoutError) as e:
                     exceptions.append(e)
                     continue
+                except AssertionError as a:
+                    if a.args[0] == '[] -- No transactions found':
+                        pass
+                    else:
+                        exceptions.append(a)
+                        continue
                 break
             if len(exceptions) == 3:
                 raise exceptions.pop()
@@ -198,13 +206,13 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         # * process BEP20 transactions
         # * check if tx is already indexed, if not, add to db
         # * crawl each transaction for receivers or senders and add them to the queue
-
-        highest_block = lowest_block = int(
-            bep20_transactions[0]['blockNumber'])
+        if len(bep20_transactions) > 0:
+            highest_block = lowest_block = int(
+                bep20_transactions[0]['blockNumber'])
         for transaction in bep20_transactions:
             id = create_checksum(transaction['hash'])
-            if not bep20_tx_db.exists(id):
-                bep20_tx_db.insert(
+            if not transactionDB_BEP20.exists(id):
+                transactionDB_BEP20.insert(
                     transaction, id)
             if transaction['from'] == address and transaction['to'] != address:
                 if transaction['to'] not in donotfollow:
@@ -280,8 +288,8 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
 
         for transaction in native_transactions:
             id = create_checksum(transaction['hash'])
-            if not nat_tx_db.exists(id):
-                nat_tx_db.insert(transaction, id)
+            if not transactionDB_NATIVE.exists(id):
+                transactionDB_NATIVE.insert(transaction, id)
 
             if transaction['from'] == address and transaction['to'] != address and followNative:
                 if transaction['to'] not in donotfollow:
@@ -309,7 +317,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                 address = crawler_queue.get(block=True, timeout=30)
 
                 is_contract = identify_contract()
-                is_indb = wallet_db.exists(address)
+                is_indb = walletDB.exists(address)
 
                 if not is_indb and not is_contract:
 
@@ -325,7 +333,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
 
                     wallet = {'address': address, 'bep20_tx_ids': bep20_tx_id_collection,
                               'native_tx_ids': nat_tx_id_collection, 'children': list(outgoing_wallets), 'parents': list(incoming_wallets)}
-                    wallet_db.insert(wallet, address)
+                    walletDB.insert(wallet, address)
 
             except queue.Empty:
                 crawler_threads.remove(thread.get_ident())
@@ -356,7 +364,7 @@ def check_if_token(contract_address: str):
         exceptions = []
         is_token = False
 
-        if not token_db.exists(contract_address):
+        if not tokenDB.exists(contract_address):
             while len(exceptions) < 3:
                 try:
                     check_API_limit()
@@ -377,7 +385,7 @@ def check_if_token(contract_address: str):
 
                         token = {'contract': contract_address, 'name': name,
                                  'symbol': symbol, 'decimals': decimals, 'source': source, 'bytecode': bytecode}
-                        token_db.insert(token, contract_address)
+                        tokenDB.insert(token, contract_address)
                 except (ConnectionError, TimeoutError) as e:
                     exceptions.append(e)
                     continue
@@ -442,27 +450,27 @@ def follow_tokenflow(by: SearchType, direction: Direction, trackBEP20: bool, tra
 
 
 def load_all_db():
-    bep20_tx_db.load()
-    nat_tx_db.load()
-    wallet_db.load()
-    token_db.load()
-    contract_db.load()
+    transactionDB_BEP20.load()
+    transactionDB_NATIVE.load()
+    walletDB.load()
+    tokenDB.load()
+    contractDB.load()
 
 
 def clear_all_db():
-    bep20_tx_db.clear()
-    nat_tx_db.clear()
-    wallet_db.clear()
-    token_db.clear()
-    contract_db.clear()
+    transactionDB_BEP20.clear()
+    transactionDB_NATIVE.clear()
+    walletDB.clear()
+    tokenDB.clear()
+    contractDB.clear()
 
 
 def save_all_db():
-    bep20_tx_db.save(indent=4)
-    nat_tx_db.save(indent=4)
-    wallet_db.save(indent=4)
-    token_db.save(indent=4)
-    contract_db.save(indent=4)
+    transactionDB_BEP20.save(indent=4)
+    transactionDB_NATIVE.save(indent=4)
+    walletDB.save(indent=4)
+    tokenDB.save(indent=4)
+    contractDB.save(indent=4)
 
 
 if __name__ == "__main__":
@@ -471,13 +479,18 @@ if __name__ == "__main__":
 
     w3 = Web3()
 
-    bep20_tx_db = dbj('.\\json_db\\bep20_tx_db.json', autosave=False)
-    nat_tx_db = dbj('.\\json_db\\nat_tx_db.json', autosave=False)
-    # tx_classification = dbj(
-    #    '.\\json_db\\tx_classification.json', autosave=False)
-    wallet_db = dbj('.\\json_db\\wallet_db.json', autosave=False)
-    token_db = dbj('.\\json_db\\token_db.json', autosave=True)
-    contract_db = dbj('.\\json_db\\contract_db.json', autosave=True)
+    transactionDB_BEP20 = dbj(os.path.join(
+        '.', 'json_db', 'transactionDB_BEP20.json'), autosave=False)
+    transactionDB_NATIVE = dbj(os.path.join(
+        '.', 'json_db', ' transactionDB_NATIVE.json'), autosave=False)
+    transactionDB_IDENTIFICATION = dbj(
+        os.path.join('.', 'json_db', 'transactionDB_IDENTIFICATION.json'), autosave=False)
+    walletDB = dbj(os.path.join(
+        '.', 'json_db', 'walletDB.json'), autosave=False)
+    tokenDB = dbj(os.path.join('.', 'json_db',
+                  'tokenDB.json'), autosave=False)
+    contractDB = dbj(os.path.join(
+        '.', 'json_db', 'contractDB.json'), autosave=False)
 
     load_all_db()
     clear_all_db()
@@ -490,7 +503,7 @@ if __name__ == "__main__":
     # follow_tokenflow(
     #    by=SearchType.TX, tx='0x470274cac1206acd765d61850aa65987818c7092de72529b827f27167ac33993', direction=Direction.RIGHT, trackBEP20=True, trackNative=True)
 
-    ''
+    if_main_end = True
 
 
-'YEET'
+prog_end = True

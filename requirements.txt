@@ -1,4 +1,6 @@
 bscscan_python==2.0.0
 dbj==0.1.10
+eth_typing==2.2.2
 ratelimit==2.2.1
-requests==2.26.0
+requests==2.22.0
+web3==5.25.0
