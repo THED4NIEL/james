@@ -12,25 +12,55 @@ analytical toolkit for BSC
 * create a report of analyzed data which is easily digestable
 * offline blockchain query (Blockscout, resource-intense) or online via third-party API (BSCscan, query-limited)
 
+----
+## development plan
+### Stage 1: DATA ACQUISITION
+- [x] conceptualize 
+- [x] build
+- [ ] improve/stabilize
 
-### *to make me obsolete
-### ETA: unknown
+### Stage 2: DATA PROCESSING AND LINKING
+- [ ] conceptualize 
+- [ ] build
+- [ ] improve/stabilize
+
+### Stage 3: VISUALIZATION
+- [ ] conceptualize 
+- [ ] build
+- [ ] improve/stabilize
+
+### Stage 4: USER INTERACTION
+- [ ] conceptualize 
+- [ ] build
+- [ ] improve/stabilize
+
+### Stage 5: QUALITY OF LIFE
+- [ ] testing
+- [ ] improve/stabilize
+
 
 ----
 ## Proposed integrations
 ### Contract security analyzation
-https://github.com/crytic/slither
+- https://github.com/crytic/slither
+
+### Decompilers
+- https://github.com/palkeo/panoramix
+- https://github.com/mkurzmann/soldec
+
+### ABI-retrieval
+- https://github.com/ethereum/eth-abi
+- https://github.com/beched/abi-decompiler
+
 
 ### Data visualization
-https://github.com/grafana/grafana
-or
-https://github.com/apache/superset
+- https://github.com/grafana/grafana
+- https://github.com/apache/superset
 
 ### Data sources
-https://github.com/pcko1/bscscan-python
-or
-https://github.com/blockscout/blockscout
+- https://github.com/pcko1/bscscan-python
+- https://github.com/blockscout/blockscout
 
 ### Data storage
-https://github.com/questdb/questdb
-or other ways
+- https://github.com/questdb/questdb
+- or other ways
