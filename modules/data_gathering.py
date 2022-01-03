@@ -37,17 +37,16 @@ class SearchType(Enum):
 
 class ADDRESS(str):
     def __init__(self, input: str):
-        if isinstance(input, str):
-            input = input.strip()
-
-            if len(input) != 42:
-                raise ValueError('address length is incorrect')
-            if input[0:2] != '0x':
-                raise ValueError('address must start with 0x')
-
-            self = input.lower()
-        else:
+        if not isinstance(input, str):
             raise ValueError('input must be string')
+        input = input.strip()
+
+        if len(input) != 42:
+            raise ValueError('address length is incorrect')
+        if input[:2] != '0x':
+            raise ValueError('address must start with 0x')
+
+        self = input.lower()
 
     def __eq__(self, other):
         return (self.casefold() == other.casefold())
@@ -61,17 +60,16 @@ class ADDRESS(str):
 
 class TXHASH(str):
     def __init__(self, input: str):
-        if isinstance(input, str):
-            input = input.strip()
-
-            if len(input) != 66:
-                raise ValueError('transaction hash length is incorrect')
-            if input[0:2] != '0x':
-                raise ValueError('transaction hash must start with 0x')
-
-            self = input.lower()
-        else:
+        if not isinstance(input, str):
             raise ValueError('input must be string')
+        input = input.strip()
+
+        if len(input) != 66:
+            raise ValueError('transaction hash length is incorrect')
+        if input[:2] != '0x':
+            raise ValueError('transaction hash must start with 0x')
+
+        self = input.lower()
 
     def __eq__(self, other):
         return (self.casefold() == other.casefold())
@@ -93,7 +91,7 @@ def recursive_search_by_address_and_contract(addresses: list, contract: ADDRESS,
             address = ADDRESS(address)
         crawler_queue.put(address)
 
-    for i in range(threads):
+    for _ in range(threads):
         time.sleep(0.25)
         t = thread.start_new_thread(
             retrieve_transactions_by_address_and_contract, (direction, trackBEP20, trackNative, followNative, contract))
@@ -101,20 +99,18 @@ def recursive_search_by_address_and_contract(addresses: list, contract: ADDRESS,
 
     while len(crawler_threads) > 0:
         time.sleep(1000)
-        pass
-
     ''
 
 
 def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP20: bool, trackNative: bool, followNative: bool, contract: ADDRESS, startblock=0, endblock=0):
     def identify_contract():
-        exceptions = []
         is_contract = False
 
         is_token_in_db = tokenDB.exists(address)
         is_contract_in_db = contractDB.exists(address)
 
         if is_token_in_db == is_contract_in_db == False:
+            exceptions = []
             while len(exceptions) < 3:
                 try:
                     check_API_limit()
@@ -138,26 +134,22 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                         token = {'contract': address, 'name': name,
                                  'symbol': symbol, 'decimals': decimals, 'source': source, 'bytecode': bytecode}
                         tokenDB.insert(token, address)
+                    elif source[0]['CompilerVersion'] != '':
+                        # * CONTRACT CONFIRMED, SAVE FOR FURTHER CLASSIFICATION
+                        first_tx = bsc.get_normal_txs_by_address_paginated(
+                            address=address, page=0, offset=1, startblock=0, endblock=999999999, sort='asc')
+                        entry = {'address': address, 'source': source, 'bytecode': bytecode,
+                                 'first_transaction': first_tx}
+                        contractDB.insert(entry, address)
+                        is_contract = True
                     else:
-                        # * IS NO TOKEN, BUT MAY BE A CONTRACT
-                        if source[0]['CompilerVersion'] != '':
-                            # * CONTRACT CONFIRMED, SAVE FOR FURTHER CLASSIFICATION
-                            first_tx = bsc.get_normal_txs_by_address_paginated(
-                                address=address, page=0, offset=1, startblock=0, endblock=999999999, sort='asc')
-                            entry = {'address': address, 'source': source, 'bytecode': bytecode,
-                                     'first_transaction': first_tx}
-                            contractDB.insert(entry, address)
-                            is_contract = True
-                        else:
-                            # * NO SIGNS OF A CONTRACT FOUND
-                            is_contract = False
+                        # * NO SIGNS OF A CONTRACT FOUND
+                        is_contract = False
                 except (ConnectionError, TimeoutError) as e:
                     exceptions.append(e)
                     continue
                 except AssertionError as a:
-                    if a.args[0] == '[] -- No transactions found':
-                        pass
-                    else:
+                    if a.args[0] != '[] -- No transactions found':
                         exceptions.append(a)
                         continue
                 break
@@ -179,8 +171,8 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         page = 1
         sort = 'asc'
         number_of_records = 10000  # max
-        exceptions = list()
-        bep20_transactions = list()
+        exceptions = []
+        bep20_transactions = []
         nonlocal highest_block, lowest_block, outgoing_wallets, incoming_wallets, bep20_tx_id_collection
 
         while True:
@@ -219,7 +211,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
             else:
                 page += 1
 
-        if len(bep20_transactions) > 0:
+        if bep20_transactions:
             highest_block = lowest_block = int(
                 bep20_transactions[0]['blockNumber'])
         for transaction in bep20_transactions:
@@ -227,14 +219,20 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
             if not transactionDB_BEP20.exists(id):
                 transactionDB_BEP20.insert(
                     transaction, id)
-            if transaction['from'] == address and transaction['to'] != address:
-                if transaction['to'] not in donotfollow:
-                    outgoing_wallets.add(
-                        transaction['to'])
-            if transaction['from'] != address and transaction['to'] == address:
-                if transaction['from'] not in donotfollow:
-                    incoming_wallets.add(
-                        transaction['from'])
+            if (
+                transaction['from'] == address
+                and transaction['to'] != address
+                and transaction['to'] not in donotfollow
+            ):
+                outgoing_wallets.add(
+                    transaction['to'])
+            if (
+                transaction['from'] != address
+                and transaction['to'] == address
+                and transaction['from'] not in donotfollow
+            ):
+                incoming_wallets.add(
+                    transaction['from'])
             block = int(transaction['blockNumber'])
             if block < lowest_block:
                 lowest_block = block
@@ -247,8 +245,8 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         page = 1
         sort = 'asc'
         number_of_records = 10000  # max
-        exceptions = list()
-        native_transactions = list()
+        exceptions = []
+        native_transactions = []
         nonlocal highest_block, lowest_block, outgoing_wallets, incoming_wallets, nat_tx_id_collection
 
         while True:
@@ -259,15 +257,14 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                         check_API_limit()
                         nat_tx_queryresult = bsc.get_normal_txs_by_address_paginated(
                             address=address, page=page, offset=number_of_records, startblock=lowest_block, endblock=highest_block, sort=sort)
+                    elif startblock == endblock == 0:
+                        check_API_limit()
+                        nat_tx_queryresult = bsc.get_normal_txs_by_address_paginated(
+                            address=address, page=page, offset=number_of_records, startblock=0, endblock=999999999, sort=sort)
                     else:
-                        if startblock == endblock == 0:
-                            check_API_limit()
-                            nat_tx_queryresult = bsc.get_normal_txs_by_address_paginated(
-                                address=address, page=page, offset=number_of_records, startblock=0, endblock=999999999, sort=sort)
-                        else:
-                            check_API_limit()
-                            nat_tx_queryresult = bsc.get_normal_txs_by_address_paginated(
-                                address=address, page=page, offset=number_of_records, startblock=startblock, endblock=endblock, sort=sort)
+                        check_API_limit()
+                        nat_tx_queryresult = bsc.get_normal_txs_by_address_paginated(
+                            address=address, page=page, offset=number_of_records, startblock=startblock, endblock=endblock, sort=sort)
                 except (ConnectionError, TimeoutError) as e:
                     exceptions.append(e)
                     continue
@@ -303,14 +300,22 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
             if not transactionDB_NATIVE.exists(id):
                 transactionDB_NATIVE.insert(transaction, id)
 
-            if transaction['from'] == address and transaction['to'] != address and followNative:
-                if transaction['to'] not in donotfollow:
-                    outgoing_wallets.add(
-                        transaction['to'])
-            if transaction['from'] != address and transaction['to'] == address and followNative:
-                if transaction['from'] not in donotfollow:
-                    incoming_wallets.add(
-                        transaction['from'])
+            if (
+                transaction['from'] == address
+                and transaction['to'] != address
+                and followNative
+                and transaction['to'] not in donotfollow
+            ):
+                outgoing_wallets.add(
+                    transaction['to'])
+            if (
+                transaction['from'] != address
+                and transaction['to'] == address
+                and followNative
+                and transaction['from'] not in donotfollow
+            ):
+                incoming_wallets.add(
+                    transaction['from'])
 
             nat_tx_id_collection.append(id)
 
@@ -367,16 +372,15 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
 
 
 def create_checksum(item: str):
-    hex_checksum = str(hex(hash(item) & 0xffffffff))
-    return hex_checksum
+    return str(hex(hash(item) & 0xffffffff))
 
 
 def check_if_token(contract_address: ADDRESS):
     with BscScan(api_key=api_key, asynchronous=False) as bsc:
-        exceptions = []
         is_token = False
 
         if not tokenDB.exists(contract_address):
+            exceptions = []
             while len(exceptions) < 3:
                 try:
                     check_API_limit()
@@ -444,7 +448,7 @@ def follow_tokenflow_by_tx(transaction_hash: TXHASH, direction: Direction, track
         recipients = []
         for log in receipt['logs']:
             tmp = log['topics'][2]
-            recipients.append(ADDRESS(tmp[0:2] + tmp[-40:]))
+            recipients.append(ADDRESS(tmp[:2] + tmp[-40:]))
 
         recursive_search_by_address_and_contract(
             addresses=recipients, contract=contract_address, threads=threadlimit, direction=direction, trackBEP20=trackBEP20, trackNative=trackNative, followNative=followNative)
@@ -505,7 +509,7 @@ w3 = Web3()
 transactionDB_BEP20 = dbj(os.path.join(
     '.', 'json_db', 'transactionDB_BEP20.json'), autosave=False)
 transactionDB_NATIVE = dbj(os.path.join(
-    '.', 'json_db', ' transactionDB_NATIVE.json'), autosave=False)
+    '.', 'json_db', 'transactionDB_NATIVE.json'), autosave=False)
 transactionDB_IDENTIFICATION = dbj(
     os.path.join('.', 'json_db', 'transactionDB_IDENTIFICATION.json'), autosave=False)
 walletDB = dbj(os.path.join(
@@ -521,7 +525,7 @@ donotfollow = set()
 
 threadlimit = int()
 crawler_queue = queue.Queue()
-crawler_threads = list()
+crawler_threads = []
 
 if __name__ == "__main__":
     ''

@@ -1,3 +1,6 @@
+# TASKS
+*.todo
+
 # API-KEY
 api_key.txt
 
