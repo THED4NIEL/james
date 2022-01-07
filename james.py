@@ -38,12 +38,12 @@ if __name__ == "__main__":
     gatherer.APICALLS_PER_SECOND = 4
 
     # set max. crawler threads
-    gatherer.threadlimit = 1
+    gatherer.threadlimit = 4
 
     # set exclusions
     gatherer.donotfollow = set.union(dead_addresses, mint_addresses)
     # endregion
-    
+
     ifmain_end = True
 
 

@@ -12,7 +12,7 @@ from web3 import Web3
 from web3.main import Web3
 
 # region API CALL LIMITER
-APICALLS_PER_SECOND = int()
+APICALLS_PER_SECOND = 4
 
 
 @sleep_and_retry
@@ -98,6 +98,11 @@ def APIretry(func):
                     raise e
                 else:
                     continue
+            except AssertionError as a:
+                if a.args[0] == 'Max rate limit reached -- NOTOK':
+                    continue
+                else:
+                    raise a
             else:
                 break
 
@@ -188,7 +193,20 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
             address=address, page=0, offset=1, startblock=0, endblock=999999999, sort='asc')
 
     def save_contract_information(first_native_tx, source, bytecode):
-        entry = {'address': address, 'source': source, 'bytecode': bytecode,
+        entry = {'Address': address,
+                 'ABI': source[0]['ABI'],
+                 'ContractName': source[0]['ContractName'],
+                 'CompilerVersion': source[0]['CompilerVersion'],
+                 'OptimizationUsed': source[0]['OptimizationUsed'],
+                 'Runs': source[0]['Runs'],
+                 'ConstructorArguments': source[0]['ConstructorArguments'],
+                 'EVMVersion': source[0]['EVMVersion'],
+                 'Library': source[0]['Library'],
+                 'LicenseType': source[0]['LicenseType'],
+                 'Proxy': source[0]['Proxy'],
+                 'Implementation': source[0]['Implementation'],
+                 'SwarmSource': source[0]['SwarmSource'],
+                 'Bytecode': bytecode,
                  'first_transaction': first_native_tx}
         contractDB.insert(entry, address)
 
@@ -197,9 +215,23 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         name = first_bep_tx[0]['tokenName']
         symbol = first_bep_tx[0]['tokenSymbol']
         decimals = first_bep_tx[0]['tokenDecimal']
-
-        token = {'contract': address, 'name': name,
-                 'symbol': symbol, 'decimals': decimals, 'source': source, 'bytecode': bytecode}
+        token = {'ContractAddress': address,
+                 'Name': name,
+                 'Symbol': symbol,
+                 'Decimals': decimals,
+                 'ABI': source[0]['ABI'],
+                 'ContractName': source[0]['ContractName'],
+                 'CompilerVersion': source[0]['CompilerVersion'],
+                 'OptimizationUsed': source[0]['OptimizationUsed'],
+                 'Runs': source[0]['Runs'],
+                 'ConstructorArguments': source[0]['ConstructorArguments'],
+                 'EVMVersion': source[0]['EVMVersion'],
+                 'Library': source[0]['Library'],
+                 'LicenseType': source[0]['LicenseType'],
+                 'Proxy': source[0]['Proxy'],
+                 'Implementation': source[0]['Implementation'],
+                 'SwarmSource': source[0]['SwarmSource'],
+                 'Bytecode': bytecode}
         tokenDB.insert(token, address)
 
     @APIretry
@@ -235,8 +267,6 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                 page = 1
             else:
                 page += 1
-
-        return bep20_transactions
 
     def process_bep20_transactions():
         # * process bep20 transactions
@@ -444,8 +474,23 @@ def check_if_token(contract_address: ADDRESS):
         symbol = data[0]['tokenSymbol']
         decimals = data[0]['tokenDecimal']
 
-        token = {'contract': contract_address, 'name': name,
-                 'symbol': symbol, 'decimals': decimals, 'source': source, 'bytecode': bytecode}
+        token = {'ContractAddress': contract_address,
+                 'Name': name,
+                 'Symbol': symbol,
+                 'Decimals': decimals,
+                 'ABI': source[0]['ABI'],
+                 'ContractName': source[0]['ContractName'],
+                 'CompilerVersion': source[0]['CompilerVersion'],
+                 'OptimizationUsed': source[0]['OptimizationUsed'],
+                 'Runs': source[0]['Runs'],
+                 'ConstructorArguments': source[0]['ConstructorArguments'],
+                 'EVMVersion': source[0]['EVMVersion'],
+                 'Library': source[0]['Library'],
+                 'LicenseType': source[0]['LicenseType'],
+                 'Proxy': source[0]['Proxy'],
+                 'Implementation': source[0]['Implementation'],
+                 'SwarmSource': source[0]['SwarmSource'],
+                 'Bytecode': bytecode}
         tokenDB.insert(token, contract_address)
 
     with BscScan(api_key=api_key, asynchronous=False) as bsc:
