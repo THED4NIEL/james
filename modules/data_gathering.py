@@ -4,7 +4,7 @@ import queue
 import time
 from enum import Enum, auto
 
-from functools import lru_cache
+from functools import lru_cache, reduce
 from bscscan import BscScan
 from dbj import dbj
 from ratelimit import limits, sleep_and_retry
@@ -278,7 +278,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
             highest_block = lowest_block = int(
                 bep20_transactions[0]['blockNumber'])
         for transaction in bep20_transactions:
-            id = create_checksum(transaction['hash'])
+            id = create_checksum(transaction)
             if not transactionDB_BEP20.exists(id):
                 transactionDB_BEP20.insert(
                     transaction, id)
@@ -339,7 +339,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
         nonlocal native_transactions, outgoing_wallets, incoming_wallets, nat_tx_id_collection
 
         for transaction in native_transactions:
-            id = create_checksum(transaction['hash'])
+            id = create_checksum(transaction)
             if not transactionDB_NATIVE.exists(id):
                 transactionDB_NATIVE.insert(transaction, id)
 
@@ -440,8 +440,10 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
 
 
 @lru_cache
-def create_checksum(item: str):
-    return str(hex(hash(item) & 0xffffffff))
+def create_checksum(entry):
+    checksum = reduce(
+        lambda x, y: x ^ y, [hash(z) for z in entry.items()])
+    return str(hex(checksum & 0xffffffff))
 
 
 def check_if_token(contract_address: ADDRESS):
