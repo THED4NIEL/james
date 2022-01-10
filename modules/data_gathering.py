@@ -425,10 +425,13 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                     nat_tx_id_collection.clear()
 
 
+def create_checksum(entry: dict):
+    return calculate_checksum(frozenset(entry.items()))
+
+
 @lru_cache
-def create_checksum(entry):
-    checksum = reduce(
-        lambda x, y: x ^ y, [hash(z) for z in entry.items()])
+def calculate_checksum(fs: frozenset):
+    checksum = hash(fs)
     return str(hex(checksum & 0xffffffff))
 
 
