@@ -133,10 +133,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
     def identify_contract(address):
         is_contract = False
 
-        is_token_in_db = tokenDB.exists(address)
-        is_contract_in_db = contractDB.exists(address)
-
-        if is_token_in_db == is_contract_in_db == False:
+        if not contractDB.exists(address):
             circulating = get_circulating_supply(address)
             source = get_source(address)
             if circulating > 0:
@@ -146,8 +143,8 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                 bytecode = get_bytecode(address)
                 beptx = get_first_bep20_transaction(address)
 
-                save_token_information(
-                    beptx, source, bytecode)
+                save_contract_information(
+                    beptx, source, bytecode, True)
             elif source[0]['CompilerVersion'] != '':
                 # * CONTRACT CONFIRMED, SAVE FOR FURTHER CLASSIFICATION
                 is_contract = True
@@ -156,7 +153,7 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                 nattx = get_first_native_transaction(address)
 
                 save_contract_information(
-                    nattx, source, bytecode)
+                    nattx, source, bytecode, False)
             else:
                 # * NO SIGNS OF A CONTRACT FOUND
                 is_contract = False
@@ -190,32 +187,20 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
     def get_first_native_transaction(address):
         check_API_limit()
         return bsc.get_normal_txs_by_address_paginated(
-            address=address, page=0, offset=1, startblock=0, endblock=999999999, sort='asc')
+            address=address, page=1, offset=1, startblock=0, endblock=999999999, sort='asc')
 
-    def save_contract_information(first_native_tx, source, bytecode):
-        entry = {'Address': address,
-                 'ABI': source[0]['ABI'],
-                 'ContractName': source[0]['ContractName'],
-                 'CompilerVersion': source[0]['CompilerVersion'],
-                 'OptimizationUsed': source[0]['OptimizationUsed'],
-                 'Runs': source[0]['Runs'],
-                 'ConstructorArguments': source[0]['ConstructorArguments'],
-                 'EVMVersion': source[0]['EVMVersion'],
-                 'Library': source[0]['Library'],
-                 'LicenseType': source[0]['LicenseType'],
-                 'Proxy': source[0]['Proxy'],
-                 'Implementation': source[0]['Implementation'],
-                 'SwarmSource': source[0]['SwarmSource'],
-                 'Bytecode': bytecode,
-                 'first_transaction': first_native_tx}
-        contractDB.insert(entry, address)
+    def save_contract_information(first_tx, source, bytecode, isToken):
+        if isToken == True:
+            name = first_tx[0]['tokenName']
+            symbol = first_tx[0]['tokenSymbol']
+            decimals = first_tx[0]['tokenDecimal']
+            ctype = 'token'
+        else:
+            name = symbol = decimals = ''
+            ctype = 'contract'
 
-    def save_token_information(first_bep_tx, source, bytecode):
-        check_API_limit()
-        name = first_bep_tx[0]['tokenName']
-        symbol = first_bep_tx[0]['tokenSymbol']
-        decimals = first_bep_tx[0]['tokenDecimal']
-        token = {'ContractAddress': address,
+        entry = {'type': ctype,
+                 'ContractAddress': address,
                  'Name': name,
                  'Symbol': symbol,
                  'Decimals': decimals,
@@ -231,8 +216,9 @@ def retrieve_transactions_by_address_and_contract(direction: Direction, trackBEP
                  'Proxy': source[0]['Proxy'],
                  'Implementation': source[0]['Implementation'],
                  'SwarmSource': source[0]['SwarmSource'],
-                 'Bytecode': bytecode}
-        tokenDB.insert(token, address)
+                 'Bytecode': bytecode,
+                 'first_transaction': first_tx[0]}
+        contractDB.insert(entry, address)
 
     @APIretry
     def get_bep20_transactions(address, contract_provided=False, startblock=0, endblock=0):
@@ -476,7 +462,8 @@ def check_if_token(contract_address: ADDRESS):
         symbol = data[0]['tokenSymbol']
         decimals = data[0]['tokenDecimal']
 
-        token = {'ContractAddress': contract_address,
+        token = {'type': 'token',
+                 'ContractAddress': contract_address,
                  'Name': name,
                  'Symbol': symbol,
                  'Decimals': decimals,
@@ -492,13 +479,14 @@ def check_if_token(contract_address: ADDRESS):
                  'Proxy': source[0]['Proxy'],
                  'Implementation': source[0]['Implementation'],
                  'SwarmSource': source[0]['SwarmSource'],
-                 'Bytecode': bytecode}
-        tokenDB.insert(token, contract_address)
+                 'Bytecode': bytecode,
+                 'first_transaction': data[0]}
+        contractDB.insert(token, contract_address)
 
     with BscScan(api_key=api_key, asynchronous=False) as bsc:
         is_token = False
-
-        if not tokenDB.exists(contract_address):
+        contract = contractDB.get(contract_address)
+        if not contract:
             circulating = get_circulating_supply(contract_address)
             if circulating > 0:
                 is_token = True
@@ -510,7 +498,7 @@ def check_if_token(contract_address: ADDRESS):
                 txdata = get_sample_transaction(contract_address)
 
                 save_token_information(txdata, source, bytecode)
-        else:
+        elif contract['type'] == 'token':
             is_token = True
         return is_token
 
@@ -582,27 +570,21 @@ def follow_tokenflow(by: SearchType, direction: Direction, trackBEP20: bool, tra
 def load_all_db():
     transactionDB_BEP20.load()
     transactionDB_NATIVE.load()
-    transactionDB_IDENTIFICATION.load()
     walletDB.load()
-    tokenDB.load()
     contractDB.load()
 
 
 def clear_all_db():
     transactionDB_BEP20.clear()
     transactionDB_NATIVE.clear()
-    transactionDB_IDENTIFICATION.clear()
     walletDB.clear()
-    tokenDB.clear()
     contractDB.clear()
 
 
 def save_all_db():
     transactionDB_BEP20.save(indent=0)
     transactionDB_NATIVE.save(indent=0)
-    transactionDB_IDENTIFICATION.save(indent=0)
     walletDB.save(indent=0)
-    tokenDB.save(indent=0)
     contractDB.save(indent=0)
 
 
@@ -613,12 +595,8 @@ transactionDB_BEP20 = dbj(os.path.join(
     '.', 'json_db', 'transactionDB_BEP20.json'), autosave=False)
 transactionDB_NATIVE = dbj(os.path.join(
     '.', 'json_db', 'transactionDB_NATIVE.json'), autosave=False)
-transactionDB_IDENTIFICATION = dbj(
-    os.path.join('.', 'json_db', 'transactionDB_IDENTIFICATION.json'), autosave=False)
 walletDB = dbj(os.path.join(
     '.', 'json_db', 'walletDB.json'), autosave=False)
-tokenDB = dbj(os.path.join('.', 'json_db',
-              'tokenDB.json'), autosave=False)
 contractDB = dbj(os.path.join(
     '.', 'json_db', 'contractDB.json'), autosave=False)
 
