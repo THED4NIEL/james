@@ -15,5 +15,8 @@
 				"console": "integratedTerminal"
 			}
 		]
+	},
+	"settings": {
+		"jupyter.jupyterServerType": "local"
 	}
 }

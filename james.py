@@ -1,9 +1,7 @@
-from timeit import default_timer as timer
-
-from requests.structures import CaseInsensitiveDict
-
 import modules.data_gathering as gatherer
-from modules.data_gathering import ADDRESS, TXHASH, Direction, SearchType
+import modules.data_processing as processor
+from modules.data_gathering import (ADDRESS, TXHASH, Direction, Filter,
+                                    SearchOptions, SearchType, TrackConfig)
 
 # from chatterbot import ChatBot
 # from chatterbot.trainers import ChatterBotCorpusTrainer
@@ -35,10 +33,11 @@ if __name__ == "__main__":
         gatherer.api_key = file.read()
 
     # set API limit
-    gatherer.APICALLS_PER_SECOND = 4
+    # gatherer.APICALLS_PER_SECOND = 5
 
-    # set max. crawler threads
-    gatherer.threadlimit = 4
+    # set max. threads
+    gatherer.api_threads = 1
+    gatherer.processing_threads = 1
 
     # set exclusions
     gatherer.donotfollow = set.union(dead_addresses, mint_addresses)

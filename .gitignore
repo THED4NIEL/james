@@ -5,10 +5,14 @@
 api_key.txt
 
 # DATABASES
-json_db/
+json_db/*
 
 # jupyter interactive files
 *.interactive
+
+# nuitka directories
+james.build
+james.dist
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

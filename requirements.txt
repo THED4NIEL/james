@@ -1,6 +1,7 @@
 bscscan_python==2.0.0
 dbj==0.1.10
-eth_typing==2.2.2
+icecream==2.1.1
+panoramix==0.8.0
+panoramix_decompiler_abi==0.5.2
 ratelimit==2.2.1
-requests==2.22.0
 web3==5.25.0
