@@ -189,23 +189,23 @@ def _identify_contract(bsc, address):
     is_contract = False
     if not contractDB.exists(address):
         circulating = _get_circulating_supply(bsc, address)
-        source = _get_source(bsc, address)
+        bytecode = _get_bytecode(bsc, address)
         if circulating > 0:
-            info(f'DETECTED     --- {address} TOKEN')
+            info(f'DETECTED     ---- {address} TOKEN')
             is_contract = True
-            bytecode = _get_bytecode(bsc, address)
+            source = _get_source(bsc, address)
             beptx = _get_first_bep20_transaction(bsc, address)
             _save_contract_information(address,
                                        beptx, source, bytecode, True)
-        elif source[0]['CompilerVersion'] != '':
-            info(f'DETECTED     --- {address} CONTRACT')
+        elif bytecode != '0x':
+            info(f'DETECTED     ---- {address} CONTRACT')
             is_contract = True
-            bytecode = _get_bytecode(bsc, address)
+            source = _get_source(bsc, address)
             nattx = _get_first_native_transaction(bsc, address)
             _save_contract_information(address,
                                        nattx, source, bytecode, False)
         else:
-            info(f'DETECTED     --- {address} WALLET')
+            info(f'DETECTED     ---- {address} WALLET')
             is_contract = False
     else:
         is_contract = True
@@ -403,14 +403,14 @@ def _filter_transactions(options: SearchOptions, address, database: dbj, transac
                 and tx['from'] == address
                 and tx['to'] != address
                 and tx['to'] not in donotfollow
-                ):
+            ):
             outgoing.add(
                 tx['to'])
         if (options.direction in {Direction.LEFT, Direction.ALL}
                 and tx['to'] == address
                 and tx['from'] != address
                 and tx['from'] not in donotfollow
-                ):
+            ):
             incoming.add(
                 tx['from'])
         tx_coll.add(id)
