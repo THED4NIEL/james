@@ -139,12 +139,14 @@ def APIwrapper(func):
                 result = func(*args, **kwargs)
             except (ConnectionError, TimeoutError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError) as e:
                 timeouts += 1
+                warn('APITIMEOUT   ---- Connection Error')
                 if timeouts == 5:
                     raise e
                 else:
                     continue
             except AssertionError as a:
                 if a.args[0] == 'Max rate limit reached -- NOTOK':
+                    warn('APILIMIT     ---- Max rate limit reached')
                     continue
                 elif a.args[0] == '[] -- No transactions found':
                     result = []
@@ -168,14 +170,14 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
 
     crawldb.clear()
 
-    for _ in range(processing_threads):
+    for n in range(processing_threads):
         t = thread.start_new_thread(
-            _process_transactions, (options, ''))
+            _process_transactions, (options, f'P{n}'))
         _crawler_threads.append(t)
 
-    for _ in range(api_threads):
+    for n in range(api_threads):
         t = thread.start_new_thread(
-            _retrieve_transactions, (options, ''))
+            _retrieve_transactions, (options, f'G{n}'))
         _crawler_threads.append(t)
 
     while len(_crawler_threads) > 0:
@@ -354,8 +356,8 @@ def _retrieve_transactions(options: SearchOptions, ThreadName=''):
                     is_contract = _identify_contract(bsc, address)
                     is_indb = walletDB.exists(address)
 
-                    if not is_indb and not is_contract:
-                        info(f'GATHERING    --- {address}')
+                    if is_indb == is_contract == False:
+                        info(f'GATHERING    -{ThreadName}- {address}')
                         if (TrackConfig.BEP20 == options.trackConfig
                                 or TrackConfig.BOTH == options.trackConfig):
                             bep = _get_bep20_transactions(bsc,
@@ -370,7 +372,7 @@ def _retrieve_transactions(options: SearchOptions, ThreadName=''):
                                     'bep20': bep.copy(), 'native': nat.copy()}
                         _processing_queue.put(workload)
                 else:
-                    warn(f'SKIPPING     --- {address} DUPLICATE')
+                    warn(f'SKIPPING     -{ThreadName}- {address} DUPLICATE')
 
 
 def _filter_transactions(options: SearchOptions, address, database: dbj, transactions):
@@ -398,17 +400,17 @@ def _filter_transactions(options: SearchOptions, address, database: dbj, transac
             database.insert(
                 tx, id)
         if (options.direction in {Direction.RIGHT, Direction.ALL}
-            and tx['from'] == address
-            and tx['to'] != address
-            and tx['to'] not in donotfollow
-            ):
+                and tx['from'] == address
+                and tx['to'] != address
+                and tx['to'] not in donotfollow
+                ):
             outgoing.add(
                 tx['to'])
         if (options.direction in {Direction.LEFT, Direction.ALL}
-            and tx['to'] == address
-            and tx['from'] != address
-            and tx['from'] not in donotfollow
-            ):
+                and tx['to'] == address
+                and tx['from'] != address
+                and tx['from'] not in donotfollow
+                ):
             incoming.add(
                 tx['from'])
         tx_coll.add(id)
@@ -428,7 +430,7 @@ def _process_transactions(options: SearchOptions, ThreadName=''):
             txBEP = workload.get('bep20')
 
             if not walletDB.exists(address):
-                info(f'PROCESSING   --- {address}')
+                info(f'PROCESSING   -{ThreadName}- {address}')
                 outgoing = set()
                 incoming = set()
                 bep = {'in': set(),
