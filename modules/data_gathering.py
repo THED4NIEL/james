@@ -70,12 +70,10 @@ class ADDRESS(str):
         if not isinstance(input, str):
             raise ValueError('input must be string')
         input = input.strip()
-
         if len(input) != 42:
             raise ValueError('address length is incorrect')
         if input[:2] != '0x':
             raise ValueError('address must start with 0x')
-
         self = input.lower()
 
     def __eq__(self, other):
@@ -93,12 +91,10 @@ class TXHASH(str):
         if not isinstance(input, str):
             raise ValueError('input must be string')
         input = input.strip()
-
         if len(input) != 66:
             raise ValueError('transaction hash length is incorrect')
         if input[:2] != '0x':
             raise ValueError('transaction hash must start with 0x')
-
         self = input.lower()
 
     def __eq__(self, other):
@@ -166,18 +162,16 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
     for address in addresses:
         if not isinstance(address, ADDRESS):
             address = ADDRESS(address)
-        _api_queue.put(address)
+        _address_queue.put(address)
 
-    crawldb.clear()
-
-    for n in range(processing_threads):
-        t = thread.start_new_thread(
-            _process_transactions, (options, f'P{n}'))
-        _crawler_threads.append(t)
+    thread.start_new_thread(_filter_wallets, ())
 
     for n in range(api_threads):
-        t = thread.start_new_thread(
-            _retrieve_transactions, (options, f'G{n}'))
+        t = thread.start_new_thread(_retrieve_transactions, (options, f'G{n}'))
+        _crawler_threads.append(t)
+
+    for n in range(processing_threads):
+        t = thread.start_new_thread(_process_transactions, (options, f'P{n}'))
         _crawler_threads.append(t)
 
     while len(_crawler_threads) > 0:
@@ -188,8 +182,24 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
             continue
 
 
+def _filter_wallets():
+    crawldb = dbj('crawldb.temp')
+    crawldb.clear()
+
+    while True:
+        try:
+            address = _address_queue.get(block=True, timeout=30)
+        except queue.Empty:
+            raise SystemExit
+        else:
+            if not crawldb.exists(address):
+                crawldb.insert({'checked': True}, address)
+                _api_queue.put(address)
+
+
 def _identify_contract(bsc, address):
     is_contract = False
+
     if not contractDB.exists(address):
         bytecode = _get_bytecode(bsc, address)
         if bytecode != '0x':
@@ -200,25 +210,25 @@ def _identify_contract(bsc, address):
                 beptx = _get_first_bep20_transaction(bsc, address)
                 _save_contract_information(
                     address, beptx, source, bytecode, True)
-            else:                   
+            else:
                 info(f'DETECTED     ---- {address} CONTRACT')
                 source = _get_source(bsc, address)
                 nattx = _get_first_native_transaction(bsc, address)
-                _save_contract_information(address,
-                                           nattx, source, bytecode, False)
+                _save_contract_information(
+                    address, nattx, source, bytecode, False)
             is_contract = True
         else:
             info(f'DETECTED     ---- {address} WALLET')
     else:
         is_contract = True
+
     return is_contract
 
 
 @APIwrapper
 def _get_circulating_supply(bsc, address):
     _check_API_limit()
-    return int(bsc.get_circulating_supply_by_contract_address(
-        address))
+    return int(bsc.get_circulating_supply_by_contract_address(address))
 
 
 @APIwrapper
@@ -236,15 +246,13 @@ def _get_bytecode(bsc, address):
 @APIwrapper
 def _get_first_bep20_transaction(bsc, address):
     _check_API_limit()
-    return bsc.get_bep20_token_transfer_events_by_contract_address_paginated(
-        contract_address=address, page=1, offset=1, sort='asc')
+    return bsc.get_bep20_token_transfer_events_by_contract_address_paginated(contract_address=address, page=1, offset=1, sort='asc')
 
 
 @APIwrapper
 def _get_first_native_transaction(bsc, address):
     _check_API_limit()
-    return bsc.get_normal_txs_by_address_paginated(
-        address=address, page=1, offset=1, startblock=0, endblock=999999999, sort='asc')
+    return bsc.get_normal_txs_by_address_paginated(address=address, page=1, offset=1, startblock=0, endblock=999999999, sort='asc')
 
 
 def _save_contract_information(address, first_tx, source, bytecode, isToken):
@@ -256,6 +264,7 @@ def _save_contract_information(address, first_tx, source, bytecode, isToken):
     else:
         name = symbol = decimals = ''
         ctype = 'contract'
+
     entry = {'type': ctype,
              'contractAddress': address,
              'Name': name,
@@ -275,6 +284,7 @@ def _save_contract_information(address, first_tx, source, bytecode, isToken):
              'SwarmSource': source[0]['SwarmSource'],
              'Bytecode': bytecode,
              'first_transaction': first_tx[0]}
+
     contractDB.insert(entry, address)
 
 
@@ -290,8 +300,10 @@ def _get_bep20_transactions(bsc, address, options: SearchOptions):
     sort = 'asc'
     number_of_records = 10000  # max
     bep20_transactions = []
+
     while True:
         bep20_queryresult = []
+
         if (Filter.Contract in options.filterBy
                 or Filter.Contract_and_NativeTransfers in options.filterBy):
             _check_API_limit()
@@ -306,6 +318,7 @@ def _get_bep20_transactions(bsc, address, options: SearchOptions):
             bep20_queryresult = bsc.get_bep20_token_transfer_events_by_address(
                 address=address, startblock=0, endblock=9999999999, sort=sort)
         bep20_transactions.extend(bep20_queryresult)
+
         if len(bep20_queryresult) < number_of_records or len(bep20_transactions) == 20000:
             break
         if len(bep20_transactions) == 10000:
@@ -313,6 +326,7 @@ def _get_bep20_transactions(bsc, address, options: SearchOptions):
             page = 1
         else:
             page += 1
+
     return bep20_transactions
 
 
@@ -322,8 +336,10 @@ def _get_native_transactions(bsc, address, options: SearchOptions):
     sort = 'asc'
     number_of_records = 10000  # max
     native_transactions = []
+
     while True:
         nat_tx_queryresult = []
+
         if(Filter.Blocks in options.filterBy):
             _check_API_limit()
             nat_tx_queryresult = bsc.get_normal_txs_by_address(
@@ -333,6 +349,7 @@ def _get_native_transactions(bsc, address, options: SearchOptions):
             nat_tx_queryresult = bsc.get_normal_txs_by_address_paginated(
                 address=address, page=page, offset=number_of_records, startblock=0, endblock=9999999999, sort=sort)
         native_transactions.extend(nat_tx_queryresult)
+
         if len(nat_tx_queryresult) < number_of_records or len(native_transactions) == 20000:
             break
         if len(native_transactions) == 10000:
@@ -341,6 +358,7 @@ def _get_native_transactions(bsc, address, options: SearchOptions):
             page = 1
         else:
             page += 1
+
     return native_transactions
 
 
@@ -353,28 +371,22 @@ def _retrieve_transactions(options: SearchOptions, ThreadName=''):
                 _crawler_threads.remove(thread.get_ident())
                 raise SystemExit
             else:
-                if not crawldb.exists(address):
-                    crawldb.insert({'checked': True}, address)
-                    is_contract = _identify_contract(bsc, address)
-                    is_indb = walletDB.exists(address)
-
-                    if is_indb == is_contract == False:
-                        info(f'GATHERING    -{ThreadName}- {address}')
-                        if (TrackConfig.BEP20 == options.trackConfig
-                                or TrackConfig.BOTH == options.trackConfig):
-                            bep = _get_bep20_transactions(bsc,
-                                                          address, options)
-
-                        if (TrackConfig.NATIVE == options.trackConfig
-                                or TrackConfig.BOTH == options.trackConfig):
-                            nat = _get_native_transactions(bsc,
-                                                           address, options)
-
-                        workload = {'address': address,
-                                    'bep20': bep.copy(), 'native': nat.copy()}
-                        _processing_queue.put(workload)
-                else:
-                    warn(f'SKIPPING     -{ThreadName}- {address} DUPLICATE')
+                is_contract = _identify_contract(bsc, address)
+                is_indb = walletDB.exists(address)
+                if is_indb == is_contract == False:
+                    info(f'GATHERING    -{ThreadName}- {address}')
+                    if (TrackConfig.BEP20 == options.trackConfig
+                            or TrackConfig.BOTH == options.trackConfig):
+                        bep = _get_bep20_transactions(
+                            bsc, address, options)
+                    if (TrackConfig.NATIVE == options.trackConfig
+                            or TrackConfig.BOTH == options.trackConfig):
+                        nat = _get_native_transactions(
+                            bsc, address, options)
+                    workload = {'address': address,
+                                'bep20': bep.copy(),
+                                'native': nat.copy()}
+                    _processing_queue.put(workload)
 
 
 def _filter_transactions(options: SearchOptions, address, database: dbj, transactions):
@@ -386,21 +398,25 @@ def _filter_transactions(options: SearchOptions, address, database: dbj, transac
         if (Filter.TimeStamp in options.filterBy
                 and not options.startTimestamp < tx['timeStamp'] > options.endTimestamp):
             continue
+
         if (Filter.Blocks in options.filterBy
                 and not options.startBlock < tx['blockNumber'] > options.endBlock):
             continue
+
         if(Filter.Contract in options.filterBy
            and options.contractFilter not in {tx['contractAddress'], tx['to']}):
             continue
+
         if(Filter.Contract_and_NativeTransfers in options.filterBy
            and options.contractFilter not in {tx['contractAddress'], tx['to']}
                 and tx['input'] != '0x'):
             continue
 
         id = create_checksum(tx)
+
         if not database.exists(id):
-            database.insert(
-                tx, id)
+            database.insert(tx, id)
+
         if (
             options.direction in {Direction.RIGHT, Direction.ALL}
             and tx['from'] == address
@@ -408,10 +424,9 @@ def _filter_transactions(options: SearchOptions, address, database: dbj, transac
             and tx['to'] != ''
             and tx['to'] not in donotfollow
         ) and outgoing.isdisjoint({tx['to']}):
-            _api_queue.put(
-                tx['to'])
-            outgoing.add(
-                tx['to'])
+            _address_queue.put(tx['to'])
+            outgoing.add(tx['to'])
+
         if (
             options.direction in {Direction.LEFT, Direction.ALL}
             and tx['to'] == address
@@ -419,11 +434,11 @@ def _filter_transactions(options: SearchOptions, address, database: dbj, transac
             and tx['from'] != ''
             and tx['from'] not in donotfollow
         ) and incoming.isdisjoint({tx['from']}):
-            _api_queue.put(
-                tx['from'])
-            incoming.add(
-                tx['from'])
+            _address_queue.put(tx['from'])
+            incoming.add(tx['from'])
+
         tx_coll.add(id)
+
     return {'in': incoming, 'out': outgoing, 'txid': tx_coll}
 
 
@@ -432,7 +447,7 @@ def _process_transactions(options: SearchOptions, ThreadName=''):
         try:
             workload = _processing_queue.get(block=True, timeout=20)
         except queue.Empty:
-            _crawler_threads.remove(thread.get_ident())    
+            _crawler_threads.remove(thread.get_ident())
             raise SystemExit
         else:
             address = workload.get('address')
@@ -443,10 +458,8 @@ def _process_transactions(options: SearchOptions, ThreadName=''):
                 info(f'PROCESSING   -{ThreadName}- {address}')
                 outgoing = set()
                 incoming = set()
-                bep = {'in': set(),
-                       'out': set(), 'txid': set()}
-                nat = {'in': set(),
-                       'out': set(), 'txid': set()}
+                bep = {'in': set(), 'out': set(), 'txid': set()}
+                nat = {'in': set(), 'out': set(), 'txid': set()}
 
                 if options.trackConfig in {TrackConfig.BEP20, TrackConfig.BOTH}:
                     bep = _filter_transactions(
@@ -460,8 +473,11 @@ def _process_transactions(options: SearchOptions, ThreadName=''):
                     outgoing.update(nat['out'])
                     incoming.update(nat['in'])
 
-                wallet = {'address': address, 'txBEP': list(bep['txid']),
-                          'txNAT': list(nat['txid']), 'child': list(outgoing), 'parent': list(incoming)}
+                wallet = {'address': address,
+                          'txBEP': list(bep['txid']),
+                          'txNAT': list(nat['txid']),
+                          'child': list(outgoing),
+                          'parent': list(incoming)}
                 walletDB.insert(wallet, address)
 
 
@@ -478,21 +494,19 @@ def _check_if_token(contract_address: ADDRESS):
     with BscScan(api_key=api_key, asynchronous=False) as bsc:
         is_token = False
         contract = contractDB.get(contract_address)
+
         if not contract:
             circulating = _get_circulating_supply(bsc, contract_address)
             if circulating > 0:
                 is_token = True
-
                 source = _get_source(bsc, contract_address)
-
                 bytecode = _get_bytecode(bsc, contract_address)
-
                 txdata = _get_first_bep20_transaction(bsc, contract_address)
-
                 _save_contract_information(
                     contract_address, txdata, source, bytecode, True)
         elif contract['type'] == 'token':
             is_token = True
+
         return is_token
 
 
@@ -509,8 +523,7 @@ def _follow_tokenflow_by_address(addresses: list, options: SearchOptions):
                 addresses.remove(addr)
                 addresses.append(ADDRESS(addr))
 
-    start_crawler_workers(
-        addresses=addresses, options=options)
+    start_crawler_workers(addresses=addresses, options=options)
 
 
 def _follow_tokenflow_by_tx(transaction_hash: TXHASH, options: SearchOptions):
@@ -520,7 +533,6 @@ def _follow_tokenflow_by_tx(transaction_hash: TXHASH, options: SearchOptions):
         return bsc.get_proxy_transaction_receipt(transaction_hash)
 
     with BscScan(api_key=api_key, asynchronous=False) as bsc:
-
         receipt = get_receipt_from_tx(transaction_hash)
         contract_address = ADDRESS(receipt['logs'][0]['address'])
         options.contractFilter = contract_address
@@ -529,25 +541,24 @@ def _follow_tokenflow_by_tx(transaction_hash: TXHASH, options: SearchOptions):
     is_token = _check_if_token(contract_address)
 
     if is_token:
-
         recipients = []
+
         for log in receipt['logs']:
             tmp = log['topics'][2]
             recipients.append(ADDRESS(tmp[:2] + tmp[-40:]))
 
-        start_crawler_workers(
-            addresses=recipients, options=options)
+        start_crawler_workers(addresses=recipients, options=options)
 
 
 def follow_tokenflow(by: SearchType, options: SearchOptions, tx=None, addresses=None):
     info(f'Start: {time.asctime()} ')
+
     if by == SearchType.TX and tx:
         tx = TXHASH(tx)
         _follow_tokenflow_by_tx(transaction_hash=tx, options=options)
 
     if by == SearchType.ADDR and addresses:
-        _follow_tokenflow_by_address(
-            addresses=addresses, options=options)
+        _follow_tokenflow_by_address(addresses=addresses, options=options)
 
     info(f'End: {time.asctime()}')
 # endregion
@@ -575,13 +586,11 @@ def save_all_db():
 
 
 # region SETUP
-crawldb = dbj('crawldb.temp')
 txDB_BEP20 = dbj(os.path.join(
     '.', 'json_db', 'transactionDB_BEP20.json'), autosave=False)
 txDB_NATIVE = dbj(os.path.join(
     '.', 'json_db', 'transactionDB_NATIVE.json'), autosave=False)
-walletDB = dbj(os.path.join(
-    '.', 'json_db', 'walletDB.json'), autosave=False)
+walletDB = dbj(os.path.join('.', 'json_db', 'walletDB.json'), autosave=False)
 contractDB = dbj(os.path.join(
     '.', 'json_db', 'contractDB.json'), autosave=False)
 
@@ -591,6 +600,8 @@ donotfollow = set()
 
 api_threads = int()
 processing_threads = int()
+
+_address_queue = queue.Queue()
 _api_queue = queue.Queue()
 _processing_queue = queue.Queue()
 _crawler_threads = []
