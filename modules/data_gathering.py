@@ -132,7 +132,7 @@ class SearchOptions():
 # region API retry wrapper for connection timeout
 
 def APIwrapper(func):
-    def wrap(*args, **kwargs):
+    def wrap(*args, **kwargs):  # sourcery skip: remove-redundant-except-handler
         timeouts = 0
         while True:
             try:
@@ -181,32 +181,34 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
         _crawler_threads.append(t)
 
     while len(_crawler_threads) > 0:
-        ic(_log_queue.get())
-        time.sleep(0.1)
+        try:
+            log = _log_queue.get(block=True, timeout=5)
+            ic(log)
+        except queue.Empty:
+            continue
 
 
 def _identify_contract(bsc, address):
     is_contract = False
     if not contractDB.exists(address):
-        circulating = _get_circulating_supply(bsc, address)
         bytecode = _get_bytecode(bsc, address)
-        if circulating > 0:
-            info(f'DETECTED     ---- {address} TOKEN')
+        if bytecode != '0x':
+            circulating = _get_circulating_supply(bsc, address)
+            if circulating > 0:
+                info(f'DETECTED     ---- {address} TOKEN')
+                source = _get_source(bsc, address)
+                beptx = _get_first_bep20_transaction(bsc, address)
+                _save_contract_information(
+                    address, beptx, source, bytecode, True)
+            else:                   
+                info(f'DETECTED     ---- {address} CONTRACT')
+                source = _get_source(bsc, address)
+                nattx = _get_first_native_transaction(bsc, address)
+                _save_contract_information(address,
+                                           nattx, source, bytecode, False)
             is_contract = True
-            source = _get_source(bsc, address)
-            beptx = _get_first_bep20_transaction(bsc, address)
-            _save_contract_information(address,
-                                       beptx, source, bytecode, True)
-        elif bytecode != '0x':
-            info(f'DETECTED     ---- {address} CONTRACT')
-            is_contract = True
-            source = _get_source(bsc, address)
-            nattx = _get_first_native_transaction(bsc, address)
-            _save_contract_information(address,
-                                       nattx, source, bytecode, False)
         else:
             info(f'DETECTED     ---- {address} WALLET')
-            is_contract = False
     else:
         is_contract = True
     return is_contract
@@ -346,10 +348,10 @@ def _retrieve_transactions(options: SearchOptions, ThreadName=''):
     with BscScan(api_key=api_key, asynchronous=False) as bsc:
         while True:
             try:
-                address = _api_queue.get(block=True, timeout=60)
+                address = _api_queue.get(block=True, timeout=30)
             except queue.Empty:
                 _crawler_threads.remove(thread.get_ident())
-                break
+                raise SystemExit
             else:
                 if not crawldb.exists(address):
                     crawldb.insert({'checked': True}, address)
@@ -399,18 +401,26 @@ def _filter_transactions(options: SearchOptions, address, database: dbj, transac
         if not database.exists(id):
             database.insert(
                 tx, id)
-        if (options.direction in {Direction.RIGHT, Direction.ALL}
-                and tx['from'] == address
-                and tx['to'] != address
-                and tx['to'] not in donotfollow
-            ):
+        if (
+            options.direction in {Direction.RIGHT, Direction.ALL}
+            and tx['from'] == address
+            and tx['to'] != address
+            and tx['to'] != ''
+            and tx['to'] not in donotfollow
+        ) and outgoing.isdisjoint({tx['to']}):
+            _api_queue.put(
+                tx['to'])
             outgoing.add(
                 tx['to'])
-        if (options.direction in {Direction.LEFT, Direction.ALL}
-                and tx['to'] == address
-                and tx['from'] != address
-                and tx['from'] not in donotfollow
-            ):
+        if (
+            options.direction in {Direction.LEFT, Direction.ALL}
+            and tx['to'] == address
+            and tx['from'] != address
+            and tx['from'] != ''
+            and tx['from'] not in donotfollow
+        ) and incoming.isdisjoint({tx['from']}):
+            _api_queue.put(
+                tx['from'])
             incoming.add(
                 tx['from'])
         tx_coll.add(id)
@@ -420,10 +430,10 @@ def _filter_transactions(options: SearchOptions, address, database: dbj, transac
 def _process_transactions(options: SearchOptions, ThreadName=''):
     while True:
         try:
-            workload = _processing_queue.get(block=True, timeout=60)
+            workload = _processing_queue.get(block=True, timeout=20)
         except queue.Empty:
-            _crawler_threads.remove(thread.get_ident())
-            break
+            _crawler_threads.remove(thread.get_ident())    
+            raise SystemExit
         else:
             address = workload.get('address')
             txNAT = workload.get('native')
@@ -453,18 +463,6 @@ def _process_transactions(options: SearchOptions, ThreadName=''):
                 wallet = {'address': address, 'txBEP': list(bep['txid']),
                           'txNAT': list(nat['txid']), 'child': list(outgoing), 'parent': list(incoming)}
                 walletDB.insert(wallet, address)
-
-                if options.direction == Direction.LEFT:
-                    for result in incoming:
-                        _api_queue.put(result)
-                if options.direction == Direction.RIGHT:
-                    for result in outgoing:
-                        _api_queue.put(result)
-                if options.direction == Direction.ALL:
-                    all_wallets = set.union(
-                        incoming, outgoing)
-                    for result in all_wallets:
-                        _api_queue.put(result)
 
 
 def create_checksum(entry: dict):
