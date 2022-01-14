@@ -1,7 +1,7 @@
-import modules.data_gathering as gatherer
-import modules.data_processing as processor
-from modules.data_gathering import (ADDRESS, TXHASH, Direction, Filter,
-                                    SearchOptions, SearchType, TrackConfig)
+import modules.gatherer.gatherer as gatherer
+import modules.processor.processor as processor
+import modules.logging as logger
+from modules.classes import *
 
 # from chatterbot import ChatBot
 # from chatterbot.trainers import ChatterBotCorpusTrainer
@@ -42,24 +42,39 @@ dead_addresses = {
 # endregion
 
 if __name__ == "__main__":
+    logger.show_log_threaded()
+
     # region SETUP GATHERER
     # get API key for bscscan
     with open('api_key.txt', 'r') as file:
-        gatherer.api_key = file.read()
+        gatherer.crawler.api_key = gatherer.api_key = file.read()
 
     # set API limit
     # gatherer.APICALLS_PER_SECOND = 5
 
     # set max. threads
-    gatherer.api_threads = 1
-    gatherer.processing_threads = 1
+    gatherer.crawler.api_threads = 1
+    gatherer.crawler.processing_threads = 1
 
     # set exclusions
-    gatherer.donotfollow = set.union(
+    gatherer.crawler.donotfollow = set.union(
         dead_addresses,
         mint_addresses,
         binance_hotwallets
     )
+    # endregion
+
+    # region TESTING
+    gatherer.db.reset_crawler_db()
+
+    opt = SearchOptions(Direction.RIGHT, filterBy=Filter.Contract_and_NativeTransfers,
+                        trackConfig=TrackConfig.BOTH, contractFilter='0x09e2b83fe5485a7c8beaa5dffd1d324a2b2d5c13')
+
+    gatherer.follow_tokenflow(by=SearchType.ADDR, options=opt,
+                              addresses='0x4b83911c955a007c781eb60d95d959b272d6dc10')
+    processor.transactionDB.clear()
+    processor.get_transactions()
+    processor.transactionDB.save(indent=0)
     # endregion
 
     ifmain_end = True
