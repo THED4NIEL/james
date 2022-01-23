@@ -1,13 +1,14 @@
 import _thread as thread
 import queue
 import time
+import os
 
 import modules.gatherer.api_functions as api
 import modules.logging as logger
 from bscscan import BscScan
 from modules.classes import (ADDRESS, Direction, Filter, SearchOptions,
                              TrackConfig)
-import modules.gatherer.database as db
+import modules.gatherer.database as gdb
 
 # region SETUP
 _address_queue = queue.Queue()
@@ -15,9 +16,11 @@ _api_queue = queue.Queue()
 _processing_queue = queue.Queue()
 _crawler_threads = []
 
-api_key = str()
-api_threads = int()
-processing_threads = int()
+api_key = os.getenv('API_KEY') if os.getenv('API_KEY') is not None else ''
+api_threads = int(os.getenv('API_THREADS'), base=10) if os.getenv(
+    'API_THREADS') is not None else 1
+processing_threads = int(os.getenv('CRAWLER_THREADS'), base=10) if os.getenv(
+    'CRAWLER_THREADS') is not None else 1
 donotfollow = set()
 # endregion
 
@@ -44,8 +47,6 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
         while len(_crawler_threads) > 0:
             time.sleep(1)
 
-        logger.info('----- FETCHING DONE, CHECKING FOR MISSING NAT TX -----')
-
         _get_missing_normal_transactions(bsc)
 
 
@@ -58,7 +59,7 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName=''):
             raise SystemExit
         else:
             is_contract = _identify_contract(bsc, address)
-            is_indb = db.wallet_exists(address)
+            is_indb = gdb.walletDB.exists(address)
             if is_indb == is_contract == False:
                 logger.info(f'GATHERING    -{ThreadName}- {address}')
                 if (TrackConfig.BEP20 == options.trackConfig
@@ -87,7 +88,7 @@ def _process_transactions(options: SearchOptions, ThreadName=''):
             txNAT = workload.get('native')
             txBEP = workload.get('bep20')
 
-            if not db.wallet_exists(address):
+            if not gdb.walletDB.exists(address):
                 logger.info(f'PROCESSING   -{ThreadName}- {address}')
                 outgoing = set()
                 incoming = set()
@@ -106,18 +107,18 @@ def _process_transactions(options: SearchOptions, ThreadName=''):
                     outgoing.update(nat['out'])
                     incoming.update(nat['in'])
 
-                db.wallet_insert({'address': address,
+                gdb.wallet_insert({'address': address,
                                   'txBEP': list(bep['txid']),
-                                  'txNAT': list(nat['txid']),
-                                  'child': list(outgoing),
-                                  'parent': list(incoming)})
+                                   'txNAT': list(nat['txid']),
+                                   'child': list(outgoing),
+                                   'parent': list(incoming)})
 
 
 def _get_missing_normal_transactions(bsc):
     natTX = set()
     bepTX = set()
 
-    wallets = db.wallet_data('*')
+    wallets = gdb.walletDB.getall()
 
     if not wallets:
         return
@@ -129,11 +130,12 @@ def _get_missing_normal_transactions(bsc):
     missing_natTX = bepTX - natTX
 
     logger.info(
-        f'-----  FETCHING {len(missing_natTX)}  SINGLE NATIVE TRANSACTIONS  -----')
+        f'FETCHING     ---- {len(missing_natTX)}  MISSING NATIVE TRANSACTIONS')
     for hash in missing_natTX:
         tx = api.get_normal_transaction_by_hash(bsc, hash)
+        status = api.get_tx_status(bsc, hash)
 
-        db.native_insert({
+        gdb.native_insert({
             "blockNumber": int(tx['blockNumber'], base=16),
             "timeStamp": "",
             "hash": tx['hash'],
@@ -145,8 +147,7 @@ def _get_missing_normal_transactions(bsc):
             "value": int(tx['value'], base=16),
             "gas": int(tx['gas'], base=16),
             "gasPrice": int(tx['gasPrice'], base=16),
-            "isError": "",
-            "txreceipt_status": "",
+            "txreceipt_status": status['status'],
             "input": tx['input'],
             "contractAddress": "",
             "cumulativeGasUsed": "",
@@ -180,10 +181,10 @@ def _filter_transactions(options: SearchOptions, address, type, transactions):
                 and tx['input'] != '0x'):
             continue
 
-        if TrackConfig.NATIVE:
-            db.native_insert(tx)
-        elif TrackConfig.BEP20:
-            db.bep20_insert(tx)
+        if type == TrackConfig.NATIVE:
+            gdb.native_insert(tx)
+        elif type == TrackConfig.BEP20:
+            gdb.bep20_insert(tx)
 
         if (
             options.direction in {Direction.RIGHT, Direction.ALL}
@@ -211,7 +212,7 @@ def _filter_transactions(options: SearchOptions, address, type, transactions):
 
 
 def _filter_wallets():
-    db.crawldb.clear()
+    gdb.crawldb.clear()
 
     while True:
         try:
@@ -219,15 +220,15 @@ def _filter_wallets():
         except queue.Empty:
             raise SystemExit
         else:
-            if not db.crawldb.exists(address):
-                db.crawldb.insert({'checked': True}, address)
+            if not gdb.crawldb.exists(address):
+                gdb.crawldb.insert({'checked': True}, address)
                 _api_queue.put(address)
 
 
 def _identify_contract(bsc, address):
     is_contract = False
 
-    if not db.contract_exists(address):
+    if not gdb.contractDB.exists(address):
         bytecode = api.get_bytecode(bsc, address)
         if bytecode != '0x':
             circulating = api.get_circulating_supply(bsc, address)
@@ -282,5 +283,4 @@ def _save_contract_information(address, first_tx, source, bytecode, isToken):
              'Bytecode': bytecode,
              'first_transaction': first_tx[0]}
 
-    db.contract_insert(entry)
-
+    gdb.contract_insert(entry)

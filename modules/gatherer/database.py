@@ -32,55 +32,16 @@ def wallet_insert(wallet):
     walletDB.insert(wallet, wallet['address'])
 
 
-def wallet_data(address):
-    return _data(walletDB, address)
-
-
-def wallet_exists(address):
-    return walletDB.exists(address)
-
-
-def wallet_keys(query=''):
-    return _keys(walletDB, query)
-
-
 def contract_insert(contract):
     contractDB.insert(contract, contract['contractAddress'])
-
-
-def contract_exists(address):
-    return contractDB.exists(address)
-
-
-def contract_data(address):
-    return _data(contractDB, address)
-
-
-def contract_keys(query=''):
-    return _keys(contractDB, query)
 
 
 def native_insert(transaction):
     return _insert(txDB_NATIVE, transaction)
 
 
-def native_data(uid):
-    return _data(txDB_NATIVE, uid)
-
-def native_keys(query=''):
-    return _keys(txDB_NATIVE, query)
-
-
 def bep20_insert(transaction):
     return _insert(txDB_BEP20, transaction)
-
-
-def bep20_data(uid):
-    return _data(txDB_BEP20, uid)
-
-
-def bep20_keys(query=''):
-    return _keys(txDB_BEP20, query)
 # endregion
 
 
@@ -89,17 +50,6 @@ def _insert(database, transaction):
     uid = create_checksum(transaction)
     if not database.exists(uid):
         database.insert(transaction, uid)
-        return True
-    else:
-        return False
-
-
-def _data(database, key):
-    return database.getall() if key == '*' else database.get(key)
-
-
-def _keys(database, query=''):
-    return database.getallkeys() if query == '' else database.find(query)
 
 
 def create_checksum(entry: dict):

@@ -50,6 +50,12 @@ def get_normal_transaction_by_hash(bsc, hash):
 
 
 @APIwrapper
+def get_tx_status(bsc, hash):
+    check_API_limit()
+    return bsc.get_tx_receipt_status(hash)
+
+
+@APIwrapper
 def get_circulating_supply(bsc, address):
     check_API_limit()
     return int(bsc.get_circulating_supply_by_contract_address(address))

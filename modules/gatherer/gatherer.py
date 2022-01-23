@@ -1,9 +1,11 @@
+import os
+
 import modules.gatherer.api_functions as api
 import modules.gatherer.crawler as crawler
+import modules.gatherer.database as gdb
 import modules.logging as logger
 from bscscan import BscScan
 from modules.classes import *
-import modules.gatherer.database as db
 
 # In the garden we are growin'
 # Many changes will be flowin'
@@ -12,7 +14,7 @@ import modules.gatherer.database as db
 
 
 # region SETUP
-api_key = str()
+api_key = os.getenv('API_KEY') if os.getenv('API_KEY') is not None else ''
 # endregion
 
 
@@ -46,13 +48,13 @@ def _save_contract_information(address, first_tx, source, bytecode, isToken):
              'Bytecode': bytecode,
              'first_transaction': first_tx[0]}
 
-    db.contract_insert(entry)
+    gdb.contract_insert(entry)
 
 
 def _check_token(contract_address: ADDRESS):
     with BscScan(api_key=api_key, asynchronous=False) as bsc:
         is_token = False
-        contract = db.contract_data(contract_address)
+        contract = gdb.contractDB.get(contract_address)
 
         if not contract:
             circulating = api.get_circulating_supply(bsc, contract_address)
