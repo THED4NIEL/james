@@ -1,4 +1,8 @@
 from datetime import datetime
+from functools import lru_cache
+import os
+import markdown2
+import mdformat
 
 from web3 import Web3
 from web3.main import Web3
@@ -30,6 +34,15 @@ def generate_missing_ABI_for_contractDB():
                               'ABI': abi, 'SourceCode': decompilation.text})
 
 
+@lru_cache
+def convert_to_amount(amount, decimals):
+    if not isinstance(amount, int):
+        amount = int(amount, base=10)
+    if not isinstance(decimals, int):
+        decimals = int(decimals, base=10)
+    return amount / pow(10, decimals)
+
+
 def join_transaction_data():
     normal_keys = gdb.txDB_NATIVE.getallkeys()
     bep20_left = set(gdb.txDB_BEP20.getallkeys())
@@ -41,60 +54,58 @@ def join_transaction_data():
         if not isinstance(native, dict):
             continue
 
-        if native['input'] == '0x':
-            pdb.transactionDB.insert({'hash': native['hash'],
-                                      'method': '0x',
-                                      'blockNumber': native['blockNumber'],
-                                      'timeStamp': native['timeStamp'],
-                                      'from': native['from'],
-                                      'to': native['to'],
-                                      'interactedWith': '',
-                                      'value': native['value'],
-                                      'contractAddress': native['contractAddress'],
-                                      'tokenName': '',
-                                      'tokenSymbol': '',
-                                      'tokenDecimal': '',
-                                      'txreceipt_status': native['txreceipt_status']})
-        else:
-            bep20_matches = gdb.txDB_BEP20.find(
-                'hash == "' + native['hash'] + '"')
-
-            if bep20_matches:
-                for key in bep20_matches:
-                    bep20 = gdb.txDB_BEP20.get(key)
-
-                    #! SUPPRESS LITERAL ERROR
-                    if not isinstance(bep20, dict):
-                        raise TypeError
-
-                    pdb.transactionDB.insert({'hash': native['hash'],
-                                              'method': native['input'][:10],
-                                              'blockNumber': native['blockNumber'],
-                                              'timeStamp': native['timeStamp'],
-                                              'from': bep20['from'],
-                                              'to': bep20['to'],
-                                              'interactedWith': native['to'],
-                                              'value': bep20['value'],
-                                              'contractAddress': bep20['contractAddress'],
-                                              'tokenName': bep20['tokenName'],
-                                              'tokenSymbol': bep20['tokenSymbol'],
-                                              'tokenDecimal': bep20['tokenDecimal'],
-                                              'txreceipt_status': native['txreceipt_status']})
-                bep20_left -= set(bep20_matches)
-            elif native['txreceipt_status'] == "1":
+        if native['txreceipt_status'] == "1":
+            if native['input'] == '0x':
                 pdb.transactionDB.insert({'hash': native['hash'],
-                                          'method': native['input'][:10],
-                                          'blockNumber': native['blockNumber'],
+                                          'method': '0x',
+                                          'blockNumber': int(native['blockNumber']),
                                           'timeStamp': native['timeStamp'],
                                           'from': native['from'],
                                           'to': native['to'],
                                           'interactedWith': '',
-                                          'value': native['value'],
+                                          'value': convert_to_amount(native['value'], NATIVE_DECIMAL),
                                           'contractAddress': native['contractAddress'],
-                                          'tokenName': '',
-                                          'tokenSymbol': '',
-                                          'tokenDecimal': '',
+                                          'tokenName': NATIVE_COIN,
+                                          'tokenSymbol': NATIVE_COIN,
                                           'txreceipt_status': native['txreceipt_status']})
+            else:
+                bep20_matches = gdb.txDB_BEP20.find(
+                    'hash == "' + native['hash'] + '"')
+
+                if bep20_matches:
+                    for key in bep20_matches:
+                        bep20 = gdb.txDB_BEP20.get(key)
+
+                        #! SUPPRESS LITERAL ERROR
+                        if not isinstance(bep20, dict):
+                            raise TypeError
+
+                        pdb.transactionDB.insert({'hash': native['hash'],
+                                                  'method': native['input'][:10],
+                                                  'blockNumber': int(native['blockNumber']),
+                                                  'timeStamp': native['timeStamp'],
+                                                  'from': bep20['from'],
+                                                  'to': bep20['to'],
+                                                  'interactedWith': native['to'],
+                                                  'value': convert_to_amount(bep20['value'], bep20['tokenDecimal']),
+                                                  'contractAddress': bep20['contractAddress'],
+                                                  'tokenName': bep20['tokenName'],
+                                                  'tokenSymbol': bep20['tokenSymbol'],
+                                                  'txreceipt_status': native['txreceipt_status']})
+                    bep20_left -= set(bep20_matches)
+                else:
+                    pdb.transactionDB.insert({'hash': native['hash'],
+                                              'method': native['input'][:10],
+                                              'blockNumber': int(native['blockNumber']),
+                                              'timeStamp': native['timeStamp'],
+                                              'from': native['from'],
+                                              'to': native['to'],
+                                              'interactedWith': '',
+                                              'value': convert_to_amount(native['value'], NATIVE_DECIMAL),
+                                              'contractAddress': native['contractAddress'],
+                                              'tokenName': NATIVE_COIN,
+                                              'tokenSymbol': NATIVE_COIN,
+                                              'txreceipt_status': native['txreceipt_status']})
 
     for key in bep20_left:
         bep20 = gdb.txDB_BEP20.get(key)
@@ -105,16 +116,15 @@ def join_transaction_data():
 
         pdb.transactionDB.insert({'hash': bep20['hash'],
                                   'method': 'NO_NAT_TX',
-                                  'blockNumber': bep20['blockNumber'],
+                                  'blockNumber': int(bep20['blockNumber']),
                                   'timeStamp': bep20['timeStamp'],
                                   'from': bep20['from'],
                                   'to': bep20['to'],
                                   'interactedWith': '',
-                                  'value': bep20['value'],
+                                  'value': convert_to_amount(bep20['value'], bep20['tokenDecimal']),
                                   'contractAddress': bep20['contractAddress'],
                                   'tokenName': bep20['tokenName'],
                                   'tokenSymbol': bep20['tokenSymbol'],
-                                  'tokenDecimal': bep20['tokenDecimal'],
                                   'txreceipt_status': ''})
 
 
@@ -170,33 +180,61 @@ def match_input_to_function(contractdict):
 def create_report_md():
     wallets = gdb.walletDB.getall()
 
-    report = ''
+    report = '# TABLE OF CONTENTS\n\n<!-- mdformat-toc start -->\n\n'
 
     for wallet in wallets:
         transaction_hashes = set(wallet['txBEP'] + wallet['txNAT'])
+        query = []
 
-        query = [
-            pdb.transactionDB.find(f'hash == {transaction_hash}')
-            for transaction_hash in transaction_hashes
-        ]
+        for transaction_hash in transaction_hashes:
+            query.extend(pdb.transactionDB.find(
+                f'hash == "{transaction_hash}"'))
 
         transactions = pdb.transactionDB.getmany(query)
         transactions = sorted(transactions, key=lambda d: d['blockNumber'])
 
         # TODO: include sold, bought and transfered token amounts into overview
         report += (f'# {wallet["address"]}\n\n'
-                   '| HASH  | BLOCK | METHOD | DATE | FROM | TO | VALUE | CONTRACT |\n')
+                   '| HASH | <div style="width:100px">METHOD</div> | <div style="width:100px">BLOCK</div> | <div style="width:300px">FROM</div> | <div style="width:300px">TO</div> | <div style="width:150px">VALUE</div> | CONTRACT |\n'
+                   '| :-- | :--    | :-:   | :--  | :--| --:   | :--      |\n')
 
         for transaction in transactions:
-            ts = datetime.fromtimestamp(
-                int(transaction["timeStamp"])).strftime("%m/%d/%Y, %H:%M:%S")
-            report += f'| {transaction["hash"]} | {transaction["blockNumber"]} | {transaction["method"]} | {ts} | {transaction["from"]} | {transaction["to"]} | {transaction["value"]} | {transaction["contractAddress"]} |\n'
+            if transaction['to'] == wallet['address']:
+                receiver = f'[THIS WALLET](#{wallet["address"]})'
+            elif gdb.walletDB.exists(transaction['to']):
+                receiver = f'[{transaction["to"]}](#{transaction["to"]})'
+            else:
+                receiver = f'[{transaction["to"]}](https://{BLOCK_EXPLORER}/address/{transaction["to"]})'
+
+            if transaction['from'] == wallet['address']:
+                sender = f'[THIS WALLET](#{wallet["address"]})'
+            elif gdb.walletDB.exists(transaction['from']):
+                sender = f'[{transaction["from"]}](#{transaction["from"]})'
+            else:
+                sender = f'[{transaction["from"]}](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
+
+            tokenText = f'<abbr title="{transaction["contractAddress"]}">{transaction["tokenName"]} ({transaction["tokenSymbol"]})</abbr>'
+
+            shorthash = f'<abbr title="{transaction["hash"]}">[{transaction["hash"][:15]}...](https://{BLOCK_EXPLORER}/tx/{transaction["hash"]})</abbr>'
+
+            if "swap" in transaction['method'].casefold():
+                action = f'<abbr title="{transaction["method"]}">swap</abbr>'
+            else:
+                action = transaction['method']
+
+            report += f'| {shorthash} | {action} | {transaction["blockNumber"]} | {sender} | {receiver} | {"{:10.4f}".format(transaction["value"])} | {tokenText} |\n'
 
         report += '\n\n\n'
 
+    mdreport = mdformat.text(report, extensions=["tables", "toc", "gfm"])
+
+    htmlrep = markdown2.markdown(mdreport, extras=["tables"])
+
     # TODO: name handling
     with open('testreport.md', 'w') as f:
-        f.write(report)
+        f.write(mdreport)
+    with open('testreport.html', 'w') as f:
+        f.write(htmlrep)
 
 # TODO: Create wallet relation tree
 
@@ -214,5 +252,10 @@ def process_data():
     contractdict = initialize_contracts()
     match_input_to_function(contractdict)
 
+    create_report_md()
+
 
 w3 = Web3()
+NATIVE_COIN = os.getenv('NATIVE_COIN')
+NATIVE_DECIMAL = os.getenv('NATIVE_DECIMAL')
+BLOCK_EXPLORER = os.getenv('BLOCK_EXPLORER')
