@@ -192,14 +192,19 @@ def get_bep721_transactions(bsc, address, options: SearchOptions):
     while True:
         bep721_tx_queryresult = []
 
-        if(Filter.Blocks in options.filterBy):
+        if (Filter.Contract in options.filterBy
+                or Filter.Contract_and_NativeTransfers in options.filterBy):
             check_API_limit()
-            bep721_tx_queryresult = bsc.get_normal_txs_by_address(
+            bep721_tx_queryresult = bsc.staticget_bep721_token_transfer_events_by_address_and_contract_paginated(
+                contract_address=options.contractFilter, address=address, page=page, offset=number_of_records, sort=sort)
+        elif(Filter.Blocks in options.filterBy):
+            check_API_limit()
+            bep721_tx_queryresult = bsc.get_bep721_token_transfer_events_by_address(
                 address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
         else:
             check_API_limit()
-            bep721_tx_queryresult = bsc.get_normal_txs_by_address_paginated(
-                address=address, page=page, offset=number_of_records, startblock=0, endblock=9999999999, sort=sort)
+            bep721_tx_queryresult = bsc.get_bep721_token_transfer_events_by_address(
+                address=address, startblock=0, endblock=9999999999, sort=sort)
         bep721_transactions.extend(bep721_tx_queryresult)
 
         if len(bep721_tx_queryresult) < number_of_records or len(bep721_transactions) == 20000:
