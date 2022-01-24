@@ -59,13 +59,13 @@ if __name__ == "__main__":
 
     # region TESTING
     gatherer.gdb.reset_crawler_db()
-    opt = SearchOptions(Direction.RIGHT, filterBy=Filter.Contract_and_NativeTransfers,
-                       trackConfig=TrackConfig.BOTH, contractFilter='0x09e2b83fe5485a7c8beaa5dffd1d324a2b2d5c13')
-    gatherer.follow_tokenflow(by=SearchType.ADDR, options=opt,
-                             addresses='0x4b83911c955a007c781eb60d95d959b272d6dc10')
-    gatherer.gdb.save_crawler_db()
     processor.pdb.transactionDB.clear()
+    opt = SearchOptions(Direction.RIGHT, filterBy=Filter.Contract_and_NativeTransfers,
+                        trackConfig=TrackConfig.BOTH, contractFilter='0x19263F2b4693da0991c4Df046E4bAA5386F5735E')
+    gatherer.follow_tokenflow(by=SearchType.TX, options=opt,
+                              tx='0x547fd18144efef02b8347473d28ec408bc78ef64c6edeb79e2aece4084026bce')
     processor.process_data()
+    gatherer.gdb.save_crawler_db()
     processor.pdb.transactionDB.save(indent=0)
     # endregion
 

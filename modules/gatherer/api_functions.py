@@ -1,10 +1,15 @@
+import os
 import modules.logging as logger
 from modules.classes import Filter, SearchOptions
 from ratelimit import limits, sleep_and_retry
 
 # region SETUP
 APICALLS = 1
-RATE_LIMIT = 0.225
+#! only applicable to multiprocessing
+# api_thread_mul = int(os.getenv('API_THREADS')) if os.getenv('API_THREADS') != '' else 1
+api_call_div = int(os.getenv('APICALLS_PER_SECOND')) if os.getenv(
+    'APICALLS_PER_SECOND') != '' else 5
+RATE_LIMIT = (APICALLS/api_call_div) #... * api_thread_mul
 # endregion
 
 

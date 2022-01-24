@@ -18,11 +18,11 @@ _crawler_threads = []
 
 api_key = os.getenv('API_KEY') if os.getenv('API_KEY') is not None else ''
 api_threads = int(os.getenv('API_THREADS')) if os.getenv(
-    'API_THREADS') is not None else 1
+    'API_THREADS') != '' else 1
 processing_threads = int(os.getenv('CRAWLER_THREADS')) if os.getenv(
-    'CRAWLER_THREADS') is not None else 1
+    'CRAWLER_THREADS') != '' else 1
 thread_timeout = int(os.getenv('THREAD_TIMEOUT')) if os.getenv(
-    'THREAD_TIMEOUT') is not None else None
+    'THREAD_TIMEOUT') != "0" else None
 donotfollow = set()
 # endregion
 
@@ -34,25 +34,26 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
                 address = ADDRESS(address)
             _address_queue.put(address)
 
-        thread.start_new_thread(_filter_wallets, ())
+        thread.start_new_thread(_filter_wallets, ("F0", thread_timeout))
 
         for n in range(api_threads):
             t = thread.start_new_thread(
-                _retrieve_transactions, (bsc, options, f'G{n}'))
+                _retrieve_transactions, (bsc, options, f'G{n}', thread_timeout))
             _crawler_threads.append(t)
 
         for n in range(processing_threads):
             t = thread.start_new_thread(
-                _process_transactions, (options, f'P{n}'))
+                _process_transactions, (options, f'P{n}', thread_timeout))
             _crawler_threads.append(t)
 
+        time.sleep(10)
         while (_address_queue.qsize() + _api_queue.qsize() + _processing_queue.qsize()) > 0:
             time.sleep(1)
 
         _get_missing_normal_transactions(bsc)
 
 
-def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName=''):
+def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', thread_timeout=None):
     while True:
         try:
             address = _api_queue.get(block=True, timeout=thread_timeout)
@@ -80,7 +81,7 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName=''):
             _api_queue.task_done()
 
 
-def _process_transactions(options: SearchOptions, ThreadName=''):
+def _process_transactions(options: SearchOptions, ThreadName='', thread_timeout=None):
     while True:
         try:
             workload = _processing_queue.get(
@@ -218,7 +219,7 @@ def _filter_transactions(options: SearchOptions, address, type, transactions):
     return {'in': incoming, 'out': outgoing, 'txid': tx_coll}
 
 
-def _filter_wallets():
+def _filter_wallets(ThreadName='', thread_timeout=None):
     gdb.crawldb.clear()
 
     while True:
