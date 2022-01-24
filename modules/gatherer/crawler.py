@@ -7,7 +7,7 @@ import modules.gatherer.api_functions as api
 import modules.logging as logger
 from bscscan import BscScan
 from modules.classes import (ADDRESS, Direction, Filter, SearchOptions,
-                             TrackConfig)
+                             TrackConfig, ContractType)
 import modules.gatherer.database as gdb
 
 # region SETUP
@@ -54,6 +54,7 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
 
 
 def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', thread_timeout=None):
+    # TODO: add bep721
     while True:
         try:
             address = _api_queue.get(block=True, timeout=thread_timeout)
@@ -66,11 +67,11 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', 
             if is_indb == is_contract == False:
                 logger.info(f'GATHERING    -{ThreadName}- {address}')
                 if (TrackConfig.BEP20 == options.trackConfig
-                        or TrackConfig.BOTH == options.trackConfig):
+                        or TrackConfig.ALL == options.trackConfig):
                     bep = api.get_bep20_transactions(
                         bsc, address, options)
                 if (TrackConfig.NATIVE == options.trackConfig
-                        or TrackConfig.BOTH == options.trackConfig):
+                        or TrackConfig.ALL == options.trackConfig):
                     nat = api.get_native_transactions(
                         bsc, address, options)
                 workload = {'address': address,
@@ -82,6 +83,7 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', 
 
 
 def _process_transactions(options: SearchOptions, ThreadName='', thread_timeout=None):
+    # TODO: add bep721
     while True:
         try:
             workload = _processing_queue.get(
@@ -101,13 +103,13 @@ def _process_transactions(options: SearchOptions, ThreadName='', thread_timeout=
                 bep = {'in': set(), 'out': set(), 'txid': set()}
                 nat = {'in': set(), 'out': set(), 'txid': set()}
 
-                if options.trackConfig in {TrackConfig.BEP20, TrackConfig.BOTH}:
+                if options.trackConfig in {TrackConfig.BEP20, TrackConfig.ALL}:
                     bep = _filter_transactions(
                         options, address, TrackConfig.BEP20, txBEP)
                     outgoing.update(bep['out'])
                     incoming.update(bep['in'])
 
-                if options.trackConfig in {TrackConfig.NATIVE, TrackConfig.BOTH}:
+                if options.trackConfig in {TrackConfig.NATIVE, TrackConfig.ALL}:
                     nat = _filter_transactions(
                         options, address, TrackConfig.NATIVE, txNAT)
                     outgoing.update(nat['out'])
@@ -189,6 +191,7 @@ def _filter_transactions(options: SearchOptions, address, type, transactions):
                 and tx['input'] != '0x'):
             continue
 
+        # TODO: add bep721
         if type == TrackConfig.NATIVE:
             gdb.native_insert(tx)
         elif type == TrackConfig.BEP20:
@@ -242,18 +245,25 @@ def _identify_contract(bsc, address):
         bytecode = api.get_bytecode(bsc, address)
         if bytecode != '0x':
             circulating = api.get_circulating_supply(bsc, address)
+            source = api.get_source(bsc, address)
             if circulating > 0:
-                logger.info(f'DETECTED     ---- {address} TOKEN')
-                source = api.get_source(bsc, address)
                 beptx = api.get_first_bep20_transaction(bsc, address)
-                _save_contract_information(
-                    address, beptx, source, bytecode, True)
+                if len(beptx) != 0:
+                    logger.info(f'DETECTED     ---- {address} TOKEN')
+                    _save_contract_information(
+                        address, beptx, source, bytecode, ContractType.TOKEN)
+                else:
+                    nfttx = api.get_first_bep721_transaction(bsc, address)
+                    if len(nfttx) == 0:
+                        raise Exception
+                    logger.info(f'DETECTED     ---- {address} NFT')
+                    _save_contract_information(
+                        address, nfttx, source, bytecode, ContractType.NFT)
             else:
                 logger.info(f'DETECTED     ---- {address} CONTRACT')
-                source = api.get_source(bsc, address)
                 nattx = api.get_first_native_transaction(bsc, address)
                 _save_contract_information(
-                    address, nattx, source, bytecode, False)
+                    address, nattx, source, bytecode, ContractType.CONTRACT)
             is_contract = True
         else:
             logger.info(f'DETECTED     ---- {address} WALLET')
@@ -263,18 +273,26 @@ def _identify_contract(bsc, address):
     return is_contract
 
 
-def _save_contract_information(address, first_tx, source, bytecode, isToken):
-    if isToken == True:
+def _save_contract_information(address, first_tx, source, bytecode, typedef):
+    if typedef == ContractType.TOKEN:
+        id = ''
         name = first_tx[0]['tokenName']
         symbol = first_tx[0]['tokenSymbol']
         decimals = first_tx[0]['tokenDecimal']
         ctype = 'token'
+    elif typedef == ContractType.NFT:
+        id = first_tx[0]['tokenID']
+        name = first_tx[0]['tokenName']
+        symbol = first_tx[0]['tokenSymbol']
+        decimals = first_tx[0]['tokenDecimal']
+        ctype = 'nft'
     else:
-        name = symbol = decimals = ''
+        name = symbol = decimals = id = ''
         ctype = 'contract'
 
     entry = {'type': ctype,
              'contractAddress': address,
+             'tokenID': id,
              'Name': name,
              'Symbol': symbol,
              'Decimals': decimals,
