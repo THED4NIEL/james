@@ -17,10 +17,12 @@ _processing_queue = queue.Queue()
 _crawler_threads = []
 
 api_key = os.getenv('API_KEY') if os.getenv('API_KEY') is not None else ''
-api_threads = int(os.getenv('API_THREADS'), base=10) if os.getenv(
+api_threads = int(os.getenv('API_THREADS')) if os.getenv(
     'API_THREADS') is not None else 1
-processing_threads = int(os.getenv('CRAWLER_THREADS'), base=10) if os.getenv(
+processing_threads = int(os.getenv('CRAWLER_THREADS')) if os.getenv(
     'CRAWLER_THREADS') is not None else 1
+thread_timeout = int(os.getenv('THREAD_TIMEOUT')) if os.getenv(
+    'THREAD_TIMEOUT') is not None else None
 donotfollow = set()
 # endregion
 
@@ -44,7 +46,7 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
                 _process_transactions, (options, f'P{n}'))
             _crawler_threads.append(t)
 
-        while len(_crawler_threads) > 0:
+        while (_address_queue.qsize() + _api_queue.qsize() + _processing_queue.qsize()) > 0:
             time.sleep(1)
 
         _get_missing_normal_transactions(bsc)
@@ -53,7 +55,7 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
 def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName=''):
     while True:
         try:
-            address = _api_queue.get(block=True, timeout=10)
+            address = _api_queue.get(block=True, timeout=thread_timeout)
         except queue.Empty:
             _crawler_threads.remove(thread.get_ident())
             raise SystemExit
@@ -75,11 +77,14 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName=''):
                             'native': nat.copy()}
                 _processing_queue.put(workload)
 
+            _api_queue.task_done()
+
 
 def _process_transactions(options: SearchOptions, ThreadName=''):
     while True:
         try:
-            workload = _processing_queue.get(block=True, timeout=10)
+            workload = _processing_queue.get(
+                block=True, timeout=thread_timeout)
         except queue.Empty:
             _crawler_threads.remove(thread.get_ident())
             raise SystemExit
@@ -112,6 +117,8 @@ def _process_transactions(options: SearchOptions, ThreadName=''):
                                    'txNAT': list(nat['txid']),
                                    'child': list(outgoing),
                                    'parent': list(incoming)})
+
+            _processing_queue.task_done()
 
 
 def _get_missing_normal_transactions(bsc):
@@ -216,13 +223,15 @@ def _filter_wallets():
 
     while True:
         try:
-            address = _address_queue.get(block=True, timeout=30)
+            address = _address_queue.get(block=True, timeout=thread_timeout)
         except queue.Empty:
             raise SystemExit
         else:
             if not gdb.crawldb.exists(address):
                 gdb.crawldb.insert({'checked': True}, address)
                 _api_queue.put(address)
+
+            _address_queue.task_done()
 
 
 def _identify_contract(bsc, address):
