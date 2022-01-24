@@ -20,7 +20,7 @@ analytical toolkit for BSC
 - [ ] improve/stabilize
 
 ### Stage 2: DATA PROCESSING AND LINKING
-- [ ] conceptualize 
+- [x] conceptualize 
 - [ ] build
 - [ ] improve/stabilize
 
@@ -46,15 +46,8 @@ analytical toolkit for BSC
 
 ### Decompilers
 - https://github.com/palkeo/panoramix
-- https://github.com/mkurzmann/soldec
-
-### ABI-retrieval
-- https://github.com/ethereum/eth-abi
-- https://github.com/beched/abi-decompiler
-
 
 ### Data visualization
-- https://github.com/grafana/grafana
 - https://github.com/apache/superset
 
 ### Data sources
