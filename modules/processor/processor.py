@@ -211,14 +211,23 @@ def create_report_md():
             elif gdb.walletDB.exists(transaction['from']):
                 sender = f'[{transaction["from"]}](#{transaction["from"]})'
             else:
-                sender = f'[{transaction["from"]}](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
+                if gdb.contractDB.exists(transaction['from']):
+                    contract = gdb.contractDB.get(transaction['from'])
+                    sender = f'[{contract["Name"]}</br>({transaction["from"]})](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
+                else:
+                    sender = f'[{transaction["from"]}](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
 
             tokenText = f'<abbr title="{transaction["contractAddress"]}">{transaction["tokenName"]} ({transaction["tokenSymbol"]})</abbr>'
 
-            shorthash = f'<abbr title="{transaction["hash"]}">[{transaction["hash"][:15]}...](https://{BLOCK_EXPLORER}/tx/{transaction["hash"]})</abbr>'
+            shorthash = f'[{transaction["hash"][:15]}...](https://{BLOCK_EXPLORER}/tx/{transaction["hash"]})'
 
             if "swap" in transaction['method'].casefold():
-                action = f'<abbr title="{transaction["method"]}">swap</abbr>'
+                if wallet['address'] == transaction['from']:
+                    action = f'<abbr title="{transaction["method"]}">swap (sell)</abbr>'
+                elif wallet['address'] == transaction['to']:
+                    action = f'<abbr title="{transaction["method"]}">swap (buy)</abbr>'
+                else:
+                    action = f'<abbr title="{transaction["method"]}">swap</abbr>'
             else:
                 action = transaction['method']
 
