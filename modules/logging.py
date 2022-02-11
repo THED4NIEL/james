@@ -4,15 +4,15 @@ import queue
 
 
 def warn(warn: str):
-    _log_queue.put('W> ' + warn)
+    _log_queue.put(f'W> {warn}')
 
 
 def info(info: str):
-    _log_queue.put('I> ' + info)
+    _log_queue.put(f'I> {info}')
 
 
 def err(err: str):
-    _log_queue.put('E> ' + err)
+    _log_queue.put(f'E> {err}')
 
 
 def show_log():

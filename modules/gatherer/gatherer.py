@@ -14,7 +14,7 @@ from modules.classes import *
 
 
 # region SETUP
-api_key = os.getenv('API_KEY') if os.getenv('API_KEY') is not None else ''
+api_key = os.getenv('API_KEY') or ''
 # endregion
 
 
@@ -52,7 +52,7 @@ def _save_contract_information(address, first_tx, source, bytecode, isToken):
 
 
 def _check_token(contract_address: ADDRESS):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
+    with BscScan(api_key=api_key, asynchronous=False) as bsc:  # type: ignore
         is_token = False
         contract = gdb.contractDB.get(contract_address)
 
@@ -72,14 +72,14 @@ def _check_token(contract_address: ADDRESS):
 
 
 def _get_recipients_from_receipt(transaction_hash):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
+    with BscScan(api_key=api_key, asynchronous=False) as bsc:  # type: ignore
         receipt = api.get_receipt_from_tx(bsc, transaction_hash)
         contract_address = ADDRESS(receipt['logs'][0]['address'])
         recipients = []
 
         for log in receipt['logs']:
             tmp = log['topics'][2]
-            recipients.append(ADDRESS('0x' + tmp[-40:]))
+            recipients.append(ADDRESS(f'0x{tmp[-40:]}'))
 
     return recipients, contract_address
 

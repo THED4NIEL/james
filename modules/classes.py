@@ -19,6 +19,7 @@ class Filter(Enum):
     Blocks = auto()
     NONE = auto()
 
+
 class TrackConfig(Enum):
     BEP20 = auto()
     NATIVE = auto()
@@ -30,7 +31,6 @@ class ContractType(Enum):
     TOKEN = auto()
     NFT = auto()
     CONTRACT = auto()
-
 
 
 class ADDRESS(str):
@@ -76,7 +76,9 @@ class TXHASH(str):
 
 
 class SearchOptions():
-    def __init__(self, direction: Direction, filterBy=[Filter.NONE], trackConfig=TrackConfig.ALL, contractFilter='', startBlock=0, endBlock=9999999999, startTimestamp=0, endTimestamp=2147483647):
+    def __init__(self, direction: Direction, filterBy=None, trackConfig=TrackConfig.ALL, contractFilter='', startBlock=0, endBlock=9999999999, startTimestamp=0, endTimestamp=2147483647):
+        if filterBy is None:
+            filterBy = [Filter.NONE]
         if not isinstance(filterBy, list):
             filterBy = [filterBy]
 

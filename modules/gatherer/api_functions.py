@@ -7,8 +7,7 @@ from ratelimit import limits, sleep_and_retry
 APICALLS = 1
 #! only applicable to multiprocessing
 # api_thread_mul = int(os.getenv('API_THREADS')) if os.getenv('API_THREADS') != '' else 1
-api_call_div = int(os.getenv('APICALLS_PER_SECOND')) if os.getenv(
-    'APICALLS_PER_SECOND') != '' else 5
+api_call_div = int(_acps) if (_acps := os.getenv('APICALLS_PER_SECOND')) else 5
 RATE_LIMIT = (APICALLS/api_call_div)  # ... * api_thread_mul
 # endregion
 
@@ -30,7 +29,7 @@ def APIwrapper(func):
                 timeouts += 1
                 logger.warn('APITIMEOUT   ---- Connection Error')
                 if timeouts == 5:
-                    raise e
+                    raise e from e
                 else:
                     continue
             except AssertionError as a:
@@ -41,7 +40,7 @@ def APIwrapper(func):
                     result = []
                     break
                 else:
-                    raise a
+                    raise a from a
             else:
                 break
         return result

@@ -68,44 +68,42 @@ def join_transaction_data():
                                           'tokenName': NATIVE_COIN,
                                           'tokenSymbol': NATIVE_COIN,
                                           'txreceipt_status': native['txreceipt_status']})
-            else:
-                bep20_matches = gdb.txDB_BEP20.find(
-                    'hash == "' + native['hash'] + '"')
+            elif bep20_matches := gdb.txDB_BEP20.find(
+                    'hash == "' + native['hash'] + '"'):
 
-                if bep20_matches:
-                    for key in bep20_matches:
-                        bep20 = gdb.txDB_BEP20.get(key)
+                for key in bep20_matches:
+                    bep20 = gdb.txDB_BEP20.get(key)
 
-                        #! SUPPRESS LITERAL ERROR
-                        if not isinstance(bep20, dict):
-                            raise TypeError
+                    #! SUPPRESS LITERAL ERROR
+                    if not isinstance(bep20, dict):
+                        raise TypeError
 
-                        pdb.transactionDB.insert({'hash': native['hash'],
-                                                  'method': native['input'][:10],
-                                                  'blockNumber': int(native['blockNumber']),
-                                                  'timeStamp': native['timeStamp'],
-                                                  'from': bep20['from'],
-                                                  'to': bep20['to'],
-                                                  'interactedWith': native['to'],
-                                                  'value': convert_to_amount(bep20['value'], bep20['tokenDecimal']),
-                                                  'contractAddress': bep20['contractAddress'],
-                                                  'tokenName': bep20['tokenName'],
-                                                  'tokenSymbol': bep20['tokenSymbol'],
-                                                  'txreceipt_status': native['txreceipt_status']})
-                    bep20_left -= set(bep20_matches)
-                else:
                     pdb.transactionDB.insert({'hash': native['hash'],
                                               'method': native['input'][:10],
                                               'blockNumber': int(native['blockNumber']),
                                               'timeStamp': native['timeStamp'],
-                                              'from': native['from'],
-                                              'to': native['to'],
-                                              'interactedWith': '',
-                                              'value': convert_to_amount(native['value'], NATIVE_DECIMAL),
-                                              'contractAddress': native['contractAddress'],
-                                              'tokenName': NATIVE_COIN,
-                                              'tokenSymbol': NATIVE_COIN,
+                                              'from': bep20['from'],
+                                              'to': bep20['to'],
+                                              'interactedWith': native['to'],
+                                              'value': convert_to_amount(bep20['value'], bep20['tokenDecimal']),
+                                              'contractAddress': bep20['contractAddress'],
+                                              'tokenName': bep20['tokenName'],
+                                              'tokenSymbol': bep20['tokenSymbol'],
                                               'txreceipt_status': native['txreceipt_status']})
+                bep20_left -= set(bep20_matches)
+            else:
+                pdb.transactionDB.insert({'hash': native['hash'],
+                                          'method': native['input'][:10],
+                                          'blockNumber': int(native['blockNumber']),
+                                          'timeStamp': native['timeStamp'],
+                                          'from': native['from'],
+                                          'to': native['to'],
+                                          'interactedWith': '',
+                                          'value': convert_to_amount(native['value'], NATIVE_DECIMAL),
+                                          'contractAddress': native['contractAddress'],
+                                          'tokenName': NATIVE_COIN,
+                                          'tokenSymbol': NATIVE_COIN,
+                                          'txreceipt_status': native['txreceipt_status']})
 
     for key in bep20_left:
         bep20 = gdb.txDB_BEP20.get(key)
@@ -177,6 +175,40 @@ def match_input_to_function(contractdict):
                 tx, {'method': function.function_identifier})
 
 
+def define_receiver(wallet, transaction):
+    if transaction['to'] == wallet['address']:
+        return f'[THIS WALLET](#{wallet["address"]})'
+    elif gdb.walletDB.exists(transaction['to']):
+        return f'[{transaction["to"]}](#{transaction["to"]})'
+    elif contract := gdb.contractDB.get(transaction['to']):
+        return f'[{contract["Name"]}</br>({transaction["to"]})](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
+
+    else:
+        return f'[{transaction["to"]}](https://{BLOCK_EXPLORER}/address/{transaction["to"]})'
+
+
+def define_sender(wallet, transaction):
+    if transaction['from'] == wallet['address']:
+        return f'[THIS WALLET](#{wallet["address"]})'
+    elif gdb.walletDB.exists(transaction['from']):
+        return f'[{transaction["from"]}](#{transaction["from"]})'
+    elif contract := gdb.contractDB.get(transaction['from']):
+        return f'[{contract["Name"]}</br>({transaction["from"]})](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
+    else:
+        return f'[{transaction["from"]}](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
+
+
+def define_action(wallet, transaction):
+    if "swap" not in transaction['method'].casefold():
+        return transaction['method']
+    if wallet['address'] == transaction['from']:
+        return f'<abbr title="{transaction["method"]}">swap (sell)</abbr>'
+    elif wallet['address'] == transaction['to']:
+        return f'<abbr title="{transaction["method"]}">swap (buy)</abbr>'
+    else:
+        return f'<abbr title="{transaction["method"]}">swap</abbr>'
+
+
 def create_report_md():
     wallets = gdb.walletDB.getall()
 
@@ -199,37 +231,13 @@ def create_report_md():
                    '| :-- | :--    | :-:   | :--  | :--| --:   | :--      |\n')
 
         for transaction in transactions:
-            if transaction['to'] == wallet['address']:
-                receiver = f'[THIS WALLET](#{wallet["address"]})'
-            elif gdb.walletDB.exists(transaction['to']):
-                receiver = f'[{transaction["to"]}](#{transaction["to"]})'
-            else:
-                receiver = f'[{transaction["to"]}](https://{BLOCK_EXPLORER}/address/{transaction["to"]})'
-
-            if transaction['from'] == wallet['address']:
-                sender = f'[THIS WALLET](#{wallet["address"]})'
-            elif gdb.walletDB.exists(transaction['from']):
-                sender = f'[{transaction["from"]}](#{transaction["from"]})'
-            else:
-                if gdb.contractDB.exists(transaction['from']):
-                    contract = gdb.contractDB.get(transaction['from'])
-                    sender = f'[{contract["Name"]}</br>({transaction["from"]})](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
-                else:
-                    sender = f'[{transaction["from"]}](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
+            receiver = define_receiver(wallet, transaction)
+            sender = define_sender(wallet, transaction)
 
             tokenText = f'<abbr title="{transaction["contractAddress"]}">{transaction["tokenName"]} ({transaction["tokenSymbol"]})</abbr>'
-
             shorthash = f'[{transaction["hash"][:15]}...](https://{BLOCK_EXPLORER}/tx/{transaction["hash"]})'
 
-            if "swap" in transaction['method'].casefold():
-                if wallet['address'] == transaction['from']:
-                    action = f'<abbr title="{transaction["method"]}">swap (sell)</abbr>'
-                elif wallet['address'] == transaction['to']:
-                    action = f'<abbr title="{transaction["method"]}">swap (buy)</abbr>'
-                else:
-                    action = f'<abbr title="{transaction["method"]}">swap</abbr>'
-            else:
-                action = transaction['method']
+            action = define_action(wallet, transaction)
 
             report += f'| {shorthash} | {action} | {transaction["blockNumber"]} | {sender} | {receiver} | {"{:10.4f}".format(transaction["value"])} | {tokenText} |\n'
 
@@ -244,6 +252,7 @@ def create_report_md():
         f.write(mdreport)
     with open('testreport.html', 'w') as f:
         f.write(htmlrep)
+
 
 # TODO: Create wallet relation tree
 

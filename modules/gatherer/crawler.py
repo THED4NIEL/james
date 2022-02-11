@@ -16,19 +16,18 @@ _api_queue = queue.Queue()
 _processing_queue = queue.Queue()
 _crawler_threads = []
 
-api_key = os.getenv('API_KEY') if os.getenv('API_KEY') is not None else ''
-api_threads = int(os.getenv('API_THREADS')) if os.getenv(
-    'API_THREADS') != '' else 1
-processing_threads = int(os.getenv('CRAWLER_THREADS')) if os.getenv(
-    'CRAWLER_THREADS') != '' else 1
-thread_timeout = int(os.getenv('THREAD_TIMEOUT')) if os.getenv(
-    'THREAD_TIMEOUT') != "0" else None
+api_key = os.getenv('API_KEY') or ''
+api_threads = int(_apit) if (_apit := os.getenv('API_THREADS')) else 1
+processing_threads = int(_prott) if (
+    _prott := os.getenv('CRAWLER_THREADS')) else 1
+thread_timeout = int(_tto) if (_tto := os.getenv(
+    'THREAD_TIMEOUT')) and _tto != 0 else None
 donotfollow = set()
 # endregion
 
 
 def start_crawler_workers(addresses: list, options: SearchOptions):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:
+    with BscScan(api_key=api_key, asynchronous=False) as bsc:  # type: ignore
         for address in addresses:
             if not isinstance(address, ADDRESS):
                 address = ADDRESS(address)
@@ -58,9 +57,9 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', 
     while True:
         try:
             address = _api_queue.get(block=True, timeout=thread_timeout)
-        except queue.Empty:
+        except queue.Empty as e:
             _crawler_threads.remove(thread.get_ident())
-            raise SystemExit
+            raise SystemExit from e
         else:
             is_contract = _identify_contract(bsc, address)
             is_indb = gdb.walletDB.exists(address)
@@ -70,10 +69,14 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', 
                         or TrackConfig.ALL == options.trackConfig):
                     bep = api.get_bep20_transactions(
                         bsc, address, options)
+                else:
+                    bep = []
                 if (TrackConfig.NATIVE == options.trackConfig
                         or TrackConfig.ALL == options.trackConfig):
                     nat = api.get_native_transactions(
                         bsc, address, options)
+                else:
+                    nat = []
                 workload = {'address': address,
                             'bep20': bep.copy(),
                             'native': nat.copy()}
@@ -88,9 +91,9 @@ def _process_transactions(options: SearchOptions, ThreadName='', thread_timeout=
         try:
             workload = _processing_queue.get(
                 block=True, timeout=thread_timeout)
-        except queue.Empty:
+        except queue.Empty as e:
             _crawler_threads.remove(thread.get_ident())
-            raise SystemExit
+            raise SystemExit from e
         else:
             address = workload.get('address')
             txNAT = workload.get('native')
@@ -228,8 +231,8 @@ def _filter_wallets(ThreadName='', thread_timeout=None):
     while True:
         try:
             address = _address_queue.get(block=True, timeout=thread_timeout)
-        except queue.Empty:
-            raise SystemExit
+        except queue.Empty as e:
+            raise SystemExit from e
         else:
             if not gdb.crawldb.exists(address):
                 gdb.crawldb.insert({'checked': True}, address)
@@ -248,14 +251,14 @@ def _identify_contract(bsc, address):
             source = api.get_source(bsc, address)
             if circulating > 0:
                 beptx = api.get_first_bep20_transaction(bsc, address)
-                if len(beptx) != 0:
+                if len(beptx) > 0:
                     logger.info(f'DETECTED     ---- {address} TOKEN')
                     _save_contract_information(
                         address, beptx, source, bytecode, ContractType.TOKEN)
                 else:
                     nfttx = api.get_first_bep721_transaction(bsc, address)
                     if len(nfttx) == 0:
-                        raise Exception
+                        raise Exception(address)
                     logger.info(f'DETECTED     ---- {address} NFT')
                     _save_contract_information(
                         address, nfttx, source, bytecode, ContractType.NFT)
