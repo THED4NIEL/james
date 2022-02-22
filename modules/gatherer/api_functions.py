@@ -36,6 +36,9 @@ def APIwrapper(func):
                 if a.args[0] == 'Max rate limit reached -- NOTOK':
                     logger.warn('APILIMIT     ---- Max rate limit reached')
                     continue
+                elif a.args[0] == 'None -- Query Timeout occured. Please select a smaller result dataset':
+                    logger.warn('APITIMEOUT   ---- Query Timeout')
+                    continue
                 elif a.args[0] == '[] -- No transactions found':
                     result = []
                     break

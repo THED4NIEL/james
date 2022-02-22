@@ -21,7 +21,7 @@ api_threads = int(_apit) if (_apit := os.getenv('API_THREADS')) else 1
 processing_threads = int(_prott) if (
     _prott := os.getenv('CRAWLER_THREADS')) else 1
 thread_timeout = int(_tto) if (_tto := os.getenv(
-    'THREAD_TIMEOUT')) and _tto != 0 else None
+    'THREAD_TIMEOUT')) and _tto != '0' else None
 donotfollow = set()
 # endregion
 
@@ -250,18 +250,18 @@ def _identify_contract(bsc, address):
             circulating = api.get_circulating_supply(bsc, address)
             source = api.get_source(bsc, address)
             if circulating > 0:
-                beptx = api.get_first_bep20_transaction(bsc, address)
-                if len(beptx) > 0:
+                if beptx := api.get_first_bep20_transaction(bsc, address):
                     logger.info(f'DETECTED     ---- {address} TOKEN')
                     _save_contract_information(
                         address, beptx, source, bytecode, ContractType.TOKEN)
-                else:
-                    nfttx = api.get_first_bep721_transaction(bsc, address)
-                    if len(nfttx) == 0:
-                        raise Exception(address)
+                elif nfttx := api.get_first_bep721_transaction(bsc, address):
                     logger.info(f'DETECTED     ---- {address} NFT')
                     _save_contract_information(
                         address, nfttx, source, bytecode, ContractType.NFT)
+                else:
+                    logger.info(f'NOT DETECTED ---- {address} CIRSUPP W/O TRANSF')
+                    _save_contract_information(
+                        address, [None], source, bytecode, None)
             else:
                 logger.info(f'DETECTED     ---- {address} CONTRACT')
                 nattx = api.get_first_native_transaction(bsc, address)
@@ -289,9 +289,13 @@ def _save_contract_information(address, first_tx, source, bytecode, typedef):
         symbol = first_tx[0]['tokenSymbol']
         decimals = first_tx[0]['tokenDecimal']
         ctype = 'nft'
-    else:
-        name = symbol = decimals = id = ''
+    elif typedef == ContractType.CONTRACT:
+        name = source[0]['ContractName']
+        symbol = decimals = id = 'None'
         ctype = 'contract'
+    else:
+        name = symbol = decimals = id = 'UNIDENTIFIED'
+        ctype = 'UNIDENTIFIED_CONTRACT'
 
     entry = {'type': ctype,
              'contractAddress': address,
