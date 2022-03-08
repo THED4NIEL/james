@@ -12,6 +12,11 @@ from panoramix.decompiler import decompile_bytecode
 import modules.gatherer.database as gdb
 import modules.processor.database as pdb
 
+w3 = Web3()
+NATIVE_COIN = os.getenv('NATIVE_COIN')
+NATIVE_DECIMAL = os.getenv('NATIVE_DECIMAL')
+BLOCK_EXPLORER = os.getenv('BLOCK_EXPLORER')
+
 
 def decompile_contract(contract_bytecode):
     return decompile_bytecode(contract_bytecode)
@@ -255,7 +260,7 @@ def create_report_md():
 
 
 # TODO: Create wallet relation tree
-
+# ? https://github.com/networkx/networkx
 
 # TODO: Calculate sells, buys, transfers
 
@@ -271,9 +276,3 @@ def process_data():
     match_input_to_function(contractdict)
 
     create_report_md()
-
-
-w3 = Web3()
-NATIVE_COIN = os.getenv('NATIVE_COIN')
-NATIVE_DECIMAL = os.getenv('NATIVE_DECIMAL')
-BLOCK_EXPLORER = os.getenv('BLOCK_EXPLORER')

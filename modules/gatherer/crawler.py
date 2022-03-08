@@ -52,6 +52,7 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
         _get_missing_normal_transactions(bsc)
 
 
+# TODO: change flow to request native transactions per wallet even with TrackConfig set to BEP20 to prevent excessive post-fetching
 def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', thread_timeout=None):
     # TODO: add bep721
     while True:
@@ -65,14 +66,12 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', 
             is_indb = gdb.walletDB.exists(address)
             if is_indb == is_contract == False:
                 logger.info(f'GATHERING    -{ThreadName}- {address}')
-                if (TrackConfig.BEP20 == options.trackConfig
-                        or TrackConfig.ALL == options.trackConfig):
+                if options.trackConfig in {TrackConfig.ALL, TrackConfig.BEP20}:
                     bep = api.get_bep20_transactions(
                         bsc, address, options)
                 else:
                     bep = []
-                if (TrackConfig.NATIVE == options.trackConfig
-                        or TrackConfig.ALL == options.trackConfig):
+                if options.trackConfig in {TrackConfig.ALL, TrackConfig.NATIVE}:
                     nat = api.get_native_transactions(
                         bsc, address, options)
                 else:
@@ -169,6 +168,9 @@ def _get_missing_normal_transactions(bsc):
         })
 
 
+# TODO: change flow to save native transactions per wallet even with TrackConfig set to BEP20 to prevent excessive post-fetching
+# ! Native TX need to be fetched and put into DB, not!!! into address queue when set to BEP20
+# ! Decide wether to discard BEP20 when set to NATIVE
 def _filter_transactions(options: SearchOptions, address, type, transactions):
     outgoing = set()
     incoming = set()
@@ -188,6 +190,7 @@ def _filter_transactions(options: SearchOptions, address, type, transactions):
            and options.contractFilter[2:] not in tx['input']):
             continue
 
+        # TODO: change to only "NATIVE TRANSFERS" and treat filterby as a list
         if(Filter.Contract_and_NativeTransfers in options.filterBy
            and options.contractFilter not in {tx['contractAddress'], tx['to']}
            and options.contractFilter[2:] not in tx['input']
@@ -259,7 +262,8 @@ def _identify_contract(bsc, address):
                     _save_contract_information(
                         address, nfttx, source, bytecode, ContractType.NFT)
                 else:
-                    logger.info(f'NOT DETECTED ---- {address} CIRSUPP W/O TRANSF')
+                    logger.info(
+                        f'NOT DETECTED ---- {address} CIRSUPP W/O TRANSF')
                     _save_contract_information(
                         address, [None], source, bytecode, None)
             else:

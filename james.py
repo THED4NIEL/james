@@ -60,7 +60,7 @@ if __name__ == "__main__":
     gatherer.gdb.reset_crawler_db()
     processor.pdb.transactionDB.clear()
     opt = SearchOptions(Direction.RIGHT, filterBy=Filter.Contract_and_NativeTransfers,
-                        trackConfig=TrackConfig.ALL, contractFilter='0x19263F2b4693da0991c4Df046E4bAA5386F5735E')
+                        trackConfig=TrackConfig.BEP20, contractFilter='0x19263F2b4693da0991c4Df046E4bAA5386F5735E')
     gatherer.follow_tokenflow(by=SearchType.TX, options=opt,
                               tx='0x547fd18144efef02b8347473d28ec408bc78ef64c6edeb79e2aece4084026bce')
     processor.process_data()
