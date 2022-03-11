@@ -1,7 +1,8 @@
 import os
-import modules.logging as logger
 from modules.classes import Filter, SearchOptions
 from ratelimit import limits, sleep_and_retry
+import logging
+import inspect
 
 # region SETUP
 APICALLS = 1
@@ -27,17 +28,17 @@ def retry_wrapper(func):
                 result = func(*args, **kwargs)
             except (ConnectionError, TimeoutError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError) as e:
                 timeouts += 1
-                logger.warn('APITIMEOUT   ---- Connection Error')
+                logging.warning(f'retry_wrapper {func}: {e.args[0]}')
                 if timeouts == 5:
                     raise e from e
                 else:
                     continue
             except AssertionError as a:
-                if a.args[0] == 'Max rate limit reached -- NOTOK':
-                    logger.warn('APILIMIT     ---- Max rate limit reached')
-                    continue
-                elif a.args[0] == 'None -- Query Timeout occured. Please select a smaller result dataset':
-                    logger.warn('APITIMEOUT   ---- Query Timeout')
+                if a.args[0] in [
+                    'Max rate limit reached -- NOTOK',
+                    'None -- Query Timeout occured. Please select a smaller result dataset',
+                ]:
+                    logging.warning(f'retry_wrapper {func}: {a.args[0]}')
                     continue
                 elif a.args[0] == '[] -- No transactions found':
                     result = []
@@ -103,119 +104,190 @@ def get_receipt_from_tx(bsc, transaction_hash):
     check_API_limit()
     return bsc.get_proxy_transaction_receipt(txhash=transaction_hash)
 
+# region old transaction receivers
+# @retry_wrapper
+# def get_bep20_transactions(bsc, address, options: SearchOptions):
+#    page = 1
+#    sort = 'asc'
+#    number_of_records = 10000  # max
+#    transactions = []
+#
+#    while True:
+#        result = []
+#
+#        if (Filter.Contract in options.filterBy
+#                or Filter.Contract_and_NativeTransfers in options.filterBy):
+#            check_API_limit()
+#            result = bsc.get_bep20_token_transfer_events_by_address_and_contract_paginated(
+#                contract_address=options.contractFilter, address=address, page=page, offset=number_of_records, sort=sort)
+#        elif(Filter.Blocks in options.filterBy):
+#            check_API_limit()
+#            result = bsc.get_bep20_token_transfer_events_by_address(
+#                address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
+#        else:
+#            check_API_limit()
+#            result = bsc.get_bep20_token_transfer_events_by_address(
+#                address=address, startblock=0, endblock=9999999999, sort=sort)
+#        transactions.extend(result)
+#
+#        if len(result) < number_of_records or len(transactions) == 20000:
+#            break
+#        if len(transactions) == 10000:
+#            sort = 'desc'
+#            page = 1
+#        else:
+#            page += 1
+#
+#    return transactions
+#
+#
+# @retry_wrapper
+# def get_native_transactions(bsc, address, options: SearchOptions):
+#    page = 1
+#    sort = 'asc'
+#    number_of_records = 10000  # max
+#    transactions = []
+#
+#    while True:
+#        result = []
+#
+#        if(Filter.Blocks in options.filterBy):
+#            check_API_limit()
+#            result = bsc.get_normal_txs_by_address(
+#                address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
+#        else:
+#            check_API_limit()
+#            result = bsc.get_normal_txs_by_address_paginated(
+#                address=address, page=page, offset=number_of_records, startblock=0, endblock=9999999999, sort=sort)
+#        transactions.extend(result)
+#
+#        if len(result) < number_of_records or len(transactions) == 20000:
+#            break
+#        if len(transactions) == 10000:
+#            # * limit of 10k can be circumvented by changing sort order (max 20k)
+#            sort = 'desc'
+#            page = 1
+#        else:
+#            page += 1
+#
+#    return transactions
+#
+#
+# @retry_wrapper
+# def get_bep721_transactions(bsc, address, options: SearchOptions):
+#    page = 1
+#    sort = 'asc'
+#    number_of_records = 10000  # max
+#    transactions = []
+#
+#    while True:
+#        result = []
+#
+#        if (Filter.Contract in options.filterBy
+#                or Filter.Contract_and_NativeTransfers in options.filterBy):
+#            check_API_limit()
+#            result = bsc.staticget_bep721_token_transfer_events_by_address_and_contract_paginated(
+#                contract_address=options.contractFilter, address=address, page=page, offset=number_of_records, sort=sort)
+#        elif(Filter.Blocks in options.filterBy):
+#            check_API_limit()
+#            result = bsc.get_bep721_token_transfer_events_by_address(
+#                address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
+#        else:
+#            check_API_limit()
+#            result = bsc.get_bep721_token_transfer_events_by_address(
+#                address=address, startblock=0, endblock=9999999999, sort=sort)
+#        transactions.extend(result)
+#
+#        if len(result) < number_of_records or len(transactions) == 20000:
+#            break
+#        if len(transactions) == 10000:
+#            # * limit of 10k can be circumvented by changing sort order (max 20k)
+#            sort = 'desc'
+#            page = 1
+#        else:
+#            page += 1
+#
+#    return transactions
+# endregion
+
+
+def transaction_crawler(func):
+    def wrap(bsc, address, options, number_of_records=10000, sort='asc', page=0, startblock=0, endblock=9999999999):
+        transactions = []
+
+        # if(Filter.Blocks in options.filterBy):
+        #    upper_bounds = options.endBlock
+        #    lower_bounds = options.startBlock
+
+        # TODO: remove necessity for passing static variables, only first three args should remain
+        while True:
+            result = func(bsc, address, options, number_of_records,
+                          sort, page, startblock, startblock)
+
+            if (options.filterBy in [Filter.Contract, Filter.Contract_and_NativeTransfers] and Filter.Blocks in options.filterBy):
+                filtered = [tx for tx in result if options.contractFilter[2:] in [
+                    tx['contractAddress'], tx['to'], tx['input']] or tx['input'] == "0x"]
+                transactions.extend(filtered)
+            else:
+                transactions.extend(result)
+
+            if len(result) == number_of_records:
+                logging.info(
+                    f'transaction_crawler: reached max number of transactions for {address}, changing to block-mode')
+                if Filter.Blocks not in options.filterBy:
+                    options.filterBy.append(Filter.Blocks)
+                    options.endBlock = endblock
+
+                options.startBlock = max(
+                    (int(tx['blockNumber']) for tx in result))
+                logging.info(
+                    f'transaction_crawler: set start block of {address} to {options.startBlock}')
+            else:
+                break
+
+        return transactions
+    return wrap
+
 
 @retry_wrapper
-def get_bep20_transactions(bsc, address, options: SearchOptions):
-    # TODO: find a way to get above a 20k transaction limit
-    #! startblk = highest of first batch
-    #! endblk = lowest of second batch
-    #! get tx from range above, if result = 10000, use endblk = highest of this batch
-    page = 1
-    sort = 'asc'
-    number_of_records = 10000  # max
-    transactions = []
-
-    while True:
-        result = []
-
-        if (Filter.Contract in options.filterBy
-                or Filter.Contract_and_NativeTransfers in options.filterBy):
-            check_API_limit()
-            result = bsc.get_bep20_token_transfer_events_by_address_and_contract_paginated(
-                contract_address=options.contractFilter, address=address, page=page, offset=number_of_records, sort=sort)
-        elif(Filter.Blocks in options.filterBy):
-            check_API_limit()
-            result = bsc.get_bep20_token_transfer_events_by_address(
-                address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
-        else:
-            check_API_limit()
-            result = bsc.get_bep20_token_transfer_events_by_address(
-                address=address, startblock=0, endblock=9999999999, sort=sort)
-        transactions.extend(result)
-
-        if len(result) < number_of_records or len(transactions) == 20000:
-            break
-        if len(transactions) == 10000:
-            sort = 'desc'
-            page = 1
-        else:
-            page += 1
-
-    return transactions
+@transaction_crawler
+def get_bep_tx(bsc, address, options, number_of_records=10000, sort='asc', page=0, startblock=0, endblock=9999999999):
+    check_API_limit()
+    if (Filter.Blocks not in options.filterBy
+            and (Filter.Contract in options.filterBy or Filter.Contract_and_NativeTransfers in options.filterBy)):
+        return bsc.get_bep20_token_transfer_events_by_address_and_contract_paginated(
+            contract_address=options.contractFilter, address=address, page=page, offset=number_of_records, sort=sort)
+    elif(Filter.Blocks in options.filterBy):
+        return bsc.get_bep20_token_transfer_events_by_address(
+            address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
+    else:
+        return bsc.get_bep20_token_transfer_events_by_address(
+            address=address, startblock=startblock, endblock=endblock, sort=sort)
 
 
 @retry_wrapper
-def get_native_transactions(bsc, address, options: SearchOptions):
-    # TODO: find a way to get above a 20k transaction limit
-    #! startblk = highest of first batch
-    #! endblk = lowest of second batch
-    #! get tx from range above, if result = 10000, use endblk = highest of this batch
-    page = 1
-    sort = 'asc'
-    number_of_records = 10000  # max
-    transactions = []
-
-    while True:
-        result = []
-
-        if(Filter.Blocks in options.filterBy):
-            check_API_limit()
-            result = bsc.get_normal_txs_by_address(
-                address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
-        else:
-            check_API_limit()
-            result = bsc.get_normal_txs_by_address_paginated(
-                address=address, page=page, offset=number_of_records, startblock=0, endblock=9999999999, sort=sort)
-        transactions.extend(result)
-
-        if len(result) < number_of_records or len(transactions) == 20000:
-            break
-        if len(transactions) == 10000:
-            # * limit of 10k can be circumvented by changing sort order (max 20k)
-            sort = 'desc'
-            page = 1
-        else:
-            page += 1
-
-    return transactions
+@transaction_crawler
+def get_nat_tx(bsc, address, options, number_of_records=10000, sort='asc', page=0, startblock=0, endblock=9999999999):
+    check_API_limit()
+    if(Filter.Blocks in options.filterBy):
+        return bsc.get_normal_txs_by_address(
+            address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
+    else:
+        return bsc.get_normal_txs_by_address_paginated(
+            address=address, page=page, offset=number_of_records, startblock=startblock, endblock=endblock, sort=sort)
 
 
 @retry_wrapper
-def get_bep721_transactions(bsc, address, options: SearchOptions):
-    # TODO: find a way to get above a 20k transaction limit
-    #! startblk = highest of first batch
-    #! endblk = lowest of second batch
-    #! get tx from range above, if result = 10000, use endblk = highest of this batch
-    page = 1
-    sort = 'asc'
-    number_of_records = 10000  # max
-    transactions = []
-
-    while True:
-        result = []
-
-        if (Filter.Contract in options.filterBy
-                or Filter.Contract_and_NativeTransfers in options.filterBy):
-            check_API_limit()
-            result = bsc.staticget_bep721_token_transfer_events_by_address_and_contract_paginated(
-                contract_address=options.contractFilter, address=address, page=page, offset=number_of_records, sort=sort)
-        elif(Filter.Blocks in options.filterBy):
-            check_API_limit()
-            result = bsc.get_bep721_token_transfer_events_by_address(
-                address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
-        else:
-            check_API_limit()
-            result = bsc.get_bep721_token_transfer_events_by_address(
-                address=address, startblock=0, endblock=9999999999, sort=sort)
-        transactions.extend(result)
-
-        if len(result) < number_of_records or len(transactions) == 20000:
-            break
-        if len(transactions) == 10000:
-            # * limit of 10k can be circumvented by changing sort order (max 20k)
-            sort = 'desc'
-            page = 1
-        else:
-            page += 1
-
-    return transactions
+@transaction_crawler
+def get_nft_tx(bsc, address, options, number_of_records=10000, sort='asc', page=0, startblock=0, endblock=9999999999):
+    check_API_limit()
+    if (Filter.Blocks not in options.filterBy
+            and (Filter.Contract in options.filterBy or Filter.Contract_and_NativeTransfers in options.filterBy)):
+        return bsc.staticget_bep721_token_transfer_events_by_address_and_contract_paginated(
+            contract_address=options.contractFilter, address=address, page=page, offset=number_of_records, sort=sort)
+    elif(Filter.Blocks in options.filterBy):
+        return bsc.get_bep721_token_transfer_events_by_address(
+            address=address, startblock=options.startBlock, endblock=options.endBlock, sort=sort)
+    else:
+        return bsc.get_bep721_token_transfer_events_by_address(
+            address=address, startblock=startblock, endblock=endblock, sort=sort)

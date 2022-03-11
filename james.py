@@ -1,6 +1,7 @@
 import modules.gatherer.gatherer as gatherer
 import modules.processor.processor as processor
-import modules.logging as logger
+import logging
+import inspect
 from modules.classes import *
 from dotenv import load_dotenv
 
@@ -44,8 +45,8 @@ dead_addresses = {
 if __name__ == "__main__":
     load_dotenv()
 
-    logger.show_log_threaded()
-
+    logging.basicConfig(
+        level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s', force=True)
     # region SETUP GATHERER
 
     # set exclusions

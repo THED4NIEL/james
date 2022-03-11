@@ -2,11 +2,12 @@ import _thread as thread
 import queue
 import time
 import os
+import logging
+import inspect
 
 import modules.gatherer.api_functions as api
-import modules.logging as logger
 from bscscan import BscScan
-from modules.classes import (ADDRESS, Direction, Filter, SearchOptions,
+from modules.classes import (Address, Direction, Filter, SearchOptions,
                              TrackConfig, ContractType)
 import modules.gatherer.database as gdb
 
@@ -17,11 +18,15 @@ _processing_queue = queue.Queue()
 _crawler_threads = []
 
 api_key = os.getenv('API_KEY') or ''
+logging.debug(f'api_key = {api_key}')
 api_threads = int(_apit) if (_apit := os.getenv('API_THREADS')) else 1
+logging.debug(f'api_threads = {api_threads}')
 processing_threads = int(_prott) if (
     _prott := os.getenv('CRAWLER_THREADS')) else 1
+logging.debug(f'processing_threads = {processing_threads}')
 thread_timeout = int(_tto) if (_tto := os.getenv(
     'THREAD_TIMEOUT')) and _tto != '0' else None
+logging.debug(f'thread_timeout = {thread_timeout}')
 donotfollow = set()
 # endregion
 
@@ -29,17 +34,21 @@ donotfollow = set()
 def start_crawler_workers(addresses: list, options: SearchOptions):
     with BscScan(api_key=api_key, asynchronous=False) as bsc:  # type: ignore
         for address in addresses:
-            if not isinstance(address, ADDRESS):
-                address = ADDRESS(address)
+            if not isinstance(address, Address):
+                address = Address(address)
             _address_queue.put(address)
 
+        logging.info('Starting address filter thread')
         thread.start_new_thread(_filter_wallets, ("F0", thread_timeout))
 
+        logging.info(f'Starting {api_threads} transaction gatherer thread(s)')
         for n in range(api_threads):
             t = thread.start_new_thread(
                 _retrieve_transactions, (bsc, options, f'G{n}', thread_timeout))
             _crawler_threads.append(t)
 
+        logging.info(
+            f'Starting {processing_threads} transaction processing thread(s)')
         for n in range(processing_threads):
             t = thread.start_new_thread(
                 _process_transactions, (options, f'P{n}', thread_timeout))
@@ -49,6 +58,8 @@ def start_crawler_workers(addresses: list, options: SearchOptions):
         while (_address_queue.qsize() + _api_queue.qsize() + _processing_queue.qsize()) > 0:
             time.sleep(1)
 
+        logging.info(
+            'Gathering missing native transactions for classification')
         _get_missing_normal_transactions(bsc)
 
 
@@ -58,6 +69,8 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', 
     while True:
         try:
             address = _api_queue.get(block=True, timeout=thread_timeout)
+            logging.info(
+                f'gatherer {ThreadName}: got task {address} from queue')
         except queue.Empty as e:
             _crawler_threads.remove(thread.get_ident())
             raise SystemExit from e
@@ -65,14 +78,14 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', 
             is_contract = _identify_contract(bsc, address)
             is_indb = gdb.walletDB.exists(address)
             if is_indb == is_contract == False:
-                logger.info(f'GATHERING    -{ThreadName}- {address}')
+                # logger.info(f'GATHERING    -{ThreadName}- {address}')
                 if options.trackConfig in {TrackConfig.ALL, TrackConfig.BEP20}:
-                    bep = api.get_bep20_transactions(
+                    bep = api.get_bep_tx(
                         bsc, address, options)
                 else:
                     bep = []
                 if options.trackConfig in {TrackConfig.ALL, TrackConfig.NATIVE}:
-                    nat = api.get_native_transactions(
+                    nat = api.get_nat_tx(
                         bsc, address, options)
                 else:
                     nat = []
@@ -82,6 +95,8 @@ def _retrieve_transactions(bsc: BscScan, options: SearchOptions, ThreadName='', 
                 _processing_queue.put(workload)
 
             _api_queue.task_done()
+            logging.info(
+                f'gatherer {ThreadName}: finished task {address}')
 
 
 def _process_transactions(options: SearchOptions, ThreadName='', thread_timeout=None):
@@ -90,6 +105,8 @@ def _process_transactions(options: SearchOptions, ThreadName='', thread_timeout=
         try:
             workload = _processing_queue.get(
                 block=True, timeout=thread_timeout)
+            logging.info(
+                f'processor {ThreadName}: got task {workload["address"]} from queue')
         except queue.Empty as e:
             _crawler_threads.remove(thread.get_ident())
             raise SystemExit from e
@@ -99,7 +116,10 @@ def _process_transactions(options: SearchOptions, ThreadName='', thread_timeout=
             txBEP = workload.get('bep20')
 
             if not gdb.walletDB.exists(address):
-                logger.info(f'PROCESSING   -{ThreadName}- {address}')
+                logging.info(
+                    f'processor {ThreadName}: processing transactions from {address}')
+                logging.info(
+                    f'processor {ThreadName}: task {workload.get("address")} consists of {len(txNAT)} native and {len(txBEP)} BEP20 transactions')
                 outgoing = set()
                 incoming = set()
                 bep = {'in': set(), 'out': set(), 'txid': set()}
@@ -124,6 +144,8 @@ def _process_transactions(options: SearchOptions, ThreadName='', thread_timeout=
                                    'parent': list(incoming)})
 
             _processing_queue.task_done()
+            logging.info(
+                f'processor {ThreadName}: finished task {address}')
 
 
 def _get_missing_normal_transactions(bsc):
@@ -141,8 +163,10 @@ def _get_missing_normal_transactions(bsc):
 
     missing_natTX = bepTX - natTX
 
-    logger.info(
-        f'FETCHING     ---- {len(missing_natTX)}  MISSING NATIVE TRANSACTIONS')
+    number_missing = len(missing_natTX)
+    number_got = 0
+
+    logging.info(f'fetching {number_missing} missing native transactions')
     for hash in missing_natTX:
         tx = api.get_normal_transaction_by_hash(bsc, hash)
         status = api.get_tx_status(bsc, hash)
@@ -167,6 +191,11 @@ def _get_missing_normal_transactions(bsc):
             "confirmations": ""
         })
 
+        number_got += 1
+        if not number_got % 10:
+            logging.info(
+                f'fetched {number_got}/{number_missing} missing native transactions')
+
 
 # TODO: change flow to save native transactions per wallet even with TrackConfig set to BEP20 to prevent excessive post-fetching
 # ! Native TX need to be fetched and put into DB, not!!! into address queue when set to BEP20
@@ -175,6 +204,9 @@ def _filter_transactions(options: SearchOptions, address, type, transactions):
     outgoing = set()
     incoming = set()
     tx_coll = set()
+
+    logging.info(
+        f'txfilter: filtering {len(transactions)} transactions from {address}')
 
     for tx in transactions:
         if (Filter.TimeStamp in options.filterBy
@@ -225,6 +257,8 @@ def _filter_transactions(options: SearchOptions, address, type, transactions):
 
         tx_coll.add(tx['hash'])
 
+    logging.info(
+        f'txfilter: finished. {len(tx_coll)} transactions from {address} remaining after filtering')
     return {'in': incoming, 'out': outgoing, 'txid': tx_coll}
 
 
@@ -234,14 +268,20 @@ def _filter_wallets(ThreadName='', thread_timeout=None):
     while True:
         try:
             address = _address_queue.get(block=True, timeout=thread_timeout)
+            logging.info(
+                f'wfilter {ThreadName}: got task {address} from queue')
         except queue.Empty as e:
             raise SystemExit from e
         else:
             if not gdb.crawldb.exists(address):
                 gdb.crawldb.insert({'checked': True}, address)
                 _api_queue.put(address)
+                logging.info(
+                    f'wfilter {ThreadName}: task {address} not in database, added to queue')
 
             _address_queue.task_done()
+            logging.info(
+                f'wfilter {ThreadName}: finished task {address}')
 
 
 def _identify_contract(bsc, address):
@@ -254,26 +294,30 @@ def _identify_contract(bsc, address):
             source = api.get_source(bsc, address)
             if circulating > 0:
                 if beptx := api.get_first_bep20_transaction(bsc, address):
-                    logger.info(f'DETECTED     ---- {address} TOKEN')
+                    logging.info(
+                        f'contract identification: categorized {address} AS TOKEN')
                     _save_contract_information(
                         address, beptx, source, bytecode, ContractType.TOKEN)
                 elif nfttx := api.get_first_bep721_transaction(bsc, address):
-                    logger.info(f'DETECTED     ---- {address} NFT')
+                    logging.info(
+                        f'contract identification: categorized {address} AS NFT')
                     _save_contract_information(
                         address, nfttx, source, bytecode, ContractType.NFT)
                 else:
-                    logger.info(
-                        f'NOT DETECTED ---- {address} CIRSUPP W/O TRANSF')
+                    logging.warning(
+                        f'contract identification: categorization FAILED {address} due to CIRCULATING SUPPLY WITHOUT TRANSFER')
                     _save_contract_information(
                         address, [None], source, bytecode, None)
             else:
-                logger.info(f'DETECTED     ---- {address} CONTRACT')
+                logging.info(
+                    f'contract identification: categorized {address} AS CONTRACT')
                 nattx = api.get_first_native_transaction(bsc, address)
                 _save_contract_information(
                     address, nattx, source, bytecode, ContractType.CONTRACT)
             is_contract = True
         else:
-            logger.info(f'DETECTED     ---- {address} WALLET')
+            ''
+            logging.info(f'categorized {address} AS WALLET')
     else:
         is_contract = True
 

@@ -3,6 +3,8 @@ from functools import lru_cache
 import os
 import markdown2
 import mdformat
+import logging
+import inspect
 
 from web3 import Web3
 from web3.main import Web3

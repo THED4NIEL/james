@@ -33,7 +33,7 @@ class ContractType(Enum):
     CONTRACT = auto()
 
 
-class ADDRESS(str):
+class Address(str):
     def __init__(self, input: str):
         if not isinstance(input, str):
             raise ValueError('input must be string')
@@ -48,13 +48,13 @@ class ADDRESS(str):
         return (self.casefold() == other.casefold())
 
     def __ne__(self, other):
-        return not (self == other)
+        return not (self.casefold() == other.casefold())
 
     def __hash__(self) -> int:
         return super().__hash__()
 
 
-class TXHASH(str):
+class Hash(str):
     def __init__(self, input: str):
         if not isinstance(input, str):
             raise ValueError('input must be string')
@@ -63,13 +63,13 @@ class TXHASH(str):
             raise ValueError('transaction hash length is incorrect')
         if input[:2] != '0x':
             raise ValueError('transaction hash must start with 0x')
-        self = input.lower()
+        self = input.casefold()
 
     def __eq__(self, other):
         return (self.casefold() == other.casefold())
 
     def __ne__(self, other):
-        return not (self == other)
+        return not (self.casefold() == other.casefold())
 
     def __hash__(self) -> int:
         return super().__hash__()
@@ -85,7 +85,7 @@ class SearchOptions():
         self.direction = direction
         self.filterBy = filterBy
         self.trackConfig = trackConfig
-        self.contractFilter = contractFilter.lower()
+        self.contractFilter = Address(contractFilter)
         self.startBlock = startBlock
         self.endBlock = endBlock
         self.startTimestamp = startTimestamp
