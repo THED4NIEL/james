@@ -1,14 +1,15 @@
 from os import path
 from dbj import dbj
 from functools import lru_cache
+from modules.sessions import sessionpath
 
 
 txDB_BEP20 = dbj(
-    path.join('.', 'json_db', 'transactionDB_BEP20.json'), autosave=False)
+    path.join(sessionpath, 'transactionDB_BEP20.json'), autosave=False)
 txDB_NATIVE = dbj(
-    path.join('.', 'json_db', 'transactionDB_NATIVE.json'), autosave=False)
-walletDB = dbj(path.join('.', 'json_db', 'walletDB.json'), autosave=False)
-contractDB = dbj(path.join('.', 'json_db', 'contractDB.json'), autosave=False)
+    path.join(sessionpath, 'transactionDB_NATIVE.json'), autosave=False)
+walletDB = dbj(path.join(sessionpath, 'walletDB.json'), autosave=False)
+contractDB = dbj(path.join(sessionpath, 'contractDB.json'), autosave=False)
 crawldb = dbj('crawldb.temp')
 
 

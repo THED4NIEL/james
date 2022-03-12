@@ -1,5 +1,5 @@
 import os
-from modules.classes import Filter, SearchOptions
+from modules.classes import Filter, SearchConfig
 from ratelimit import limits, sleep_and_retry
 import logging
 import inspect
@@ -215,16 +215,12 @@ def transaction_crawler(func):
     def wrap(bsc, address, options, number_of_records=10000, sort='asc', page=0, startblock=0, endblock=9999999999):
         transactions = []
 
-        # if(Filter.Blocks in options.filterBy):
-        #    upper_bounds = options.endBlock
-        #    lower_bounds = options.startBlock
-
-        # TODO: remove necessity for passing static variables, only first three args should remain
         while True:
             result = func(bsc, address, options, number_of_records,
                           sort, page, startblock, startblock)
 
-            if (options.filterBy in [Filter.Contract, Filter.Contract_and_NativeTransfers] and Filter.Blocks in options.filterBy):
+            if ((Filter.Contract in options.filterBy or Filter.Contract_and_NativeTransfers in options.filterBy)
+                    and Filter.Blocks in options.filterBy):
                 filtered = [tx for tx in result if options.contractFilter[2:] in [
                     tx['contractAddress'], tx['to'], tx['input']] or tx['input'] == "0x"]
                 transactions.extend(filtered)

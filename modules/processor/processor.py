@@ -10,6 +10,7 @@ from web3 import Web3
 from web3.main import Web3
 from panoramix.abi import getAbiJson
 from panoramix.decompiler import decompile_bytecode
+from modules.sessions import sessionpath
 
 import modules.gatherer.database as gdb
 import modules.processor.database as pdb
@@ -255,9 +256,9 @@ def create_report_md():
     htmlrep = markdown2.markdown(mdreport, extras=["tables"])
 
     # TODO: name handling
-    with open('testreport.md', 'w') as f:
+    with open(os.path.join(sessionpath, 'report.md'), 'w') as f:
         f.write(mdreport)
-    with open('testreport.html', 'w') as f:
+    with open(os.path.join(sessionpath, 'report.html'), 'w') as f:
         f.write(htmlrep)
 
 

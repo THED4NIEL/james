@@ -75,17 +75,25 @@ class Hash(str):
         return super().__hash__()
 
 
-class SearchOptions():
-    def __init__(self, direction: Direction, filterBy=None, trackConfig=TrackConfig.ALL, contractFilter='', startBlock=0, endBlock=9999999999, startTimestamp=0, endTimestamp=2147483647):
+class SearchConfig():
+    def __init__(self, direction: Direction, filterBy=None, trackConfig=TrackConfig.ALL, search_by='', contractFilter='', startBlock=0, endBlock=9999999999, startTimestamp=0, endTimestamp=2147483647):
         if filterBy is None:
             filterBy = [Filter.NONE]
         if not isinstance(filterBy, list):
             filterBy = [filterBy]
+        if not isinstance(contractFilter, Address):
+            contractFilter = Address(contractFilter)
+
+        if len(search_by) == 66:
+            search_by = Hash(search_by)
+        elif len(search_by) == 42:
+            search_by = Address(search_by)
 
         self.direction = direction
         self.filterBy = filterBy
         self.trackConfig = trackConfig
-        self.contractFilter = Address(contractFilter)
+        self.search_by = search_by
+        self.contractFilter = contractFilter
         self.startBlock = startBlock
         self.endBlock = endBlock
         self.startTimestamp = startTimestamp

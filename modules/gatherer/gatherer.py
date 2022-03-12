@@ -85,7 +85,7 @@ def _get_recipients_from_receipt(transaction_hash):
     return recipients, contract_address
 
 
-def follow_tokenflow_by_address(addresses: list, options: SearchOptions):
+def follow_tokenflow_by_address(addresses: list, options: SearchConfig):
     if options.contractFilter != '':
         _check_token(options.contractFilter)
 
@@ -103,7 +103,7 @@ def follow_tokenflow_by_address(addresses: list, options: SearchOptions):
     crawler.start_crawler_workers(addresses=addresses, options=options)
 
 
-def follow_tokenflow_by_tx(transaction_hash: Hash, options: SearchOptions):
+def follow_tokenflow_by_tx(transaction_hash: Hash, options: SearchConfig):
     recipients, contract_address = _get_recipients_from_receipt(
         transaction_hash)
     options.contractFilter = contract_address
@@ -114,8 +114,17 @@ def follow_tokenflow_by_tx(transaction_hash: Hash, options: SearchOptions):
     crawler.start_crawler_workers(addresses=recipients, options=options)
 
 
-def follow_tokenflow(by: SearchType, options: SearchOptions, tx=None, addresses=None):
-    if by == SearchType.TX and tx:
+#def follow_tokenflow(by: SearchType, options: SearchOptions, tx=None, addresses=None):
+#    if by == SearchType.TX and tx:
+#        tx = Hash(tx)
+#        follow_tokenflow_by_tx(transaction_hash=tx, options=options)
+#
+#    if by == SearchType.ADDR and addresses:
+#        follow_tokenflow_by_address(addresses=addresses, options=options)
+
+
+def follow_tokenflow(options: SearchConfig):
+    if options.search_by and len(options.search_by) == 66:
         tx = Hash(tx)
         follow_tokenflow_by_tx(transaction_hash=tx, options=options)
 

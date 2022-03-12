@@ -8,7 +8,7 @@
 api_key.txt
 
 # DATABASES
-json_db/*
+sessions/*
 
 # jupyter interactive files
 *.interactive
