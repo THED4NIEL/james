@@ -1,4 +1,3 @@
-from re import S
 import modules.gatherer.gatherer as gatherer
 import modules.processor.processor as processor
 import logging
@@ -6,7 +5,7 @@ import inspect
 import os
 import pickle
 from modules.classes import *
-from modules.sessions import select_session, save_search_config
+from modules.sessions import continue_session
 from dotenv import load_dotenv
 
 # from chatterbot import ChatBot
@@ -61,20 +60,19 @@ if __name__ == "__main__":
     )
     # endregion
 
-    sessionpath = select_session()
-
     # region TESTING
-    gatherer.gdb.reset_crawler_db()
-    processor.pdb.transactionDB.clear()
-    opt = SearchConfig(Direction.RIGHT,
-                       filterBy=Filter.Contract_and_NativeTransfers,
-                       trackConfig=TrackConfig.BEP20,
-                       search_by='0x547fd18144efef02b8347473d28ec408bc78ef64c6edeb79e2aece4084026bce',
-                       contractFilter='0x19263F2b4693da0991c4Df046E4bAA5386F5735E')
+    resume = continue_session()
 
-    save_search_config(opt)
-
-    gatherer.follow_tokenflow(opt)
+    if resume:
+        gatherer.continue_from_session()
+    else:
+        processor.pdb.transactionDB.clear()
+        opt = SearchConfig(Direction.RIGHT,
+                           filterBy=Filter.Contract_and_NativeTransfers,
+                           trackConfig=TrackConfig.BEP20,
+                           search_by='0x547fd18144efef02b8347473d28ec408bc78ef64c6edeb79e2aece4084026bce',
+                           contractFilter='0x19263F2b4693da0991c4Df046E4bAA5386F5735E')
+        gatherer.follow_tokenflow(opt)
 
     gatherer.gdb.save_crawler_db()
     processor.process_data()

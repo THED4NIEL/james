@@ -1,10 +1,9 @@
-from os import path
+from os import path, getenv
 from dbj import dbj
 from functools import lru_cache
-from modules.sessions import sessionpath
 
 transactionDB = dbj(
-    path.join(sessionpath, 'transactionDB.json'), autosave=False)
+    path.join(getenv('SESSIONPATH'), 'transactionDB.json'), autosave=False)
 
 
 def insert_tx(transaction):

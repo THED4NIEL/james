@@ -1,19 +1,29 @@
-from os import path
+import os
 from dbj import dbj
 from functools import lru_cache
-from modules.sessions import sessionpath
+
+
+SESSIONPATH = os.getenv('SESSIONPATH')
 
 
 txDB_BEP20 = dbj(
-    path.join(sessionpath, 'transactionDB_BEP20.json'), autosave=False)
+    os.path.join(SESSIONPATH, 'transactionDB_BEP20.json'), autosave=False)
 txDB_NATIVE = dbj(
-    path.join(sessionpath, 'transactionDB_NATIVE.json'), autosave=False)
-walletDB = dbj(path.join(sessionpath, 'walletDB.json'), autosave=False)
-contractDB = dbj(path.join(sessionpath, 'contractDB.json'), autosave=False)
-crawldb = dbj('crawldb.temp')
+    os.path.join(SESSIONPATH, 'transactionDB_NATIVE.json'), autosave=False)
+walletDB = dbj(os.path.join(SESSIONPATH, 'walletDB.json'), autosave=False)
+contractDB = dbj(os.path.join(
+    SESSIONPATH, 'contractDB.json'), autosave=False)
+crawldb = dbj(os.path.join(SESSIONPATH, 'crawldb.temp'))
 
 
 def save_crawler_db():
+    txDB_BEP20.save(indent=0)
+    txDB_NATIVE.save(indent=0)
+    walletDB.save(indent=0)
+    contractDB.save(indent=0)
+
+
+def load_crawler_db():
     txDB_BEP20.save(indent=0)
     txDB_NATIVE.save(indent=0)
     walletDB.save(indent=0)

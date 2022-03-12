@@ -10,12 +10,13 @@ from web3 import Web3
 from web3.main import Web3
 from panoramix.abi import getAbiJson
 from panoramix.decompiler import decompile_bytecode
-from modules.sessions import sessionpath
 
 import modules.gatherer.database as gdb
 import modules.processor.database as pdb
 
+
 w3 = Web3()
+SESSIONPATH = os.getenv('SESSIONPATH')
 NATIVE_COIN = os.getenv('NATIVE_COIN')
 NATIVE_DECIMAL = os.getenv('NATIVE_DECIMAL')
 BLOCK_EXPLORER = os.getenv('BLOCK_EXPLORER')
@@ -256,9 +257,9 @@ def create_report_md():
     htmlrep = markdown2.markdown(mdreport, extras=["tables"])
 
     # TODO: name handling
-    with open(os.path.join(sessionpath, 'report.md'), 'w') as f:
+    with open(os.path.join(SESSIONPATH, 'report.md'), 'w') as f:
         f.write(mdreport)
-    with open(os.path.join(sessionpath, 'report.html'), 'w') as f:
+    with open(os.path.join(SESSIONPATH, 'report.html'), 'w') as f:
         f.write(htmlrep)
 
 

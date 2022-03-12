@@ -3,46 +3,37 @@ from dbj import dbj
 import os
 import pickle
 
-from classes import SearchConfig
+from modules.classes import SearchConfig
 
-sessions_default_dir = os.path.join('.', 'sessions')
+sessions_base_dir = os.path.join('.', 'sessions')
+sessions_default_dir = os.path.join('.', 'sessions', 'current')
+
 if not os.path.exists(sessions_default_dir):
     os.mkdir(sessions_default_dir)
-sessiondb = dbj(os.path.join(sessions_default_dir,
-                             'sessions.json'), autosave=True)
-sessionpath = ''
 
 
-def select_session():
-    if sessions := sessiondb.getallkeys():
-        ctr = 0
-        print('Select session via number or "0" to create a new session.\n0: NEW SESSION')
-        for key in sessions:
-            ctr += 1
-            print(f'{ctr}: {key}')
-        sel = int(input('Selection: ').strip())
-        rn = range(ctr)
+def continue_session():
+    x = os.listdir(sessions_default_dir)
+    if x:
+        print('(C)ontinue session or create (N)ew one?')
+        sel = input('(C) continue, (N) new: ').strip()
 
-        if not sel:
-            active_session = create_new_session()
-        elif 0 < sel <= ctr:
-            active_session = os.path.join(
-                sessions_default_dir, sessions[int(sel)-1])
-
-        return active_session
-    else:
-        print('No previous sessions found, creating new one.')
-        return create_new_session()
+        if not sel or sel in ('n', 'N'):
+            create_new_session()
+            return False
+        elif sel in ('c', 'C'):
+            return True
 
 
 def create_new_session():
+    x = os.listdir(sessions_default_dir)
+
+    if x:
+        created_date, _ = [x for x in os.listdir(
+            sessions_default_dir) if '.created' in x]
+        os.rename(sessions_default_dir, os.path.join(
+            sessions_base_dir, created_date))
+        os.mkdir(sessions_default_dir)
     time = str(datetime.datetime.now().strftime('%y%m%d_%H%M'))
-    sessionpath = os.path.join(sessions_default_dir, time)
-    os.mkdir(sessionpath)
-    sessiondb.insert({'sessionpath': sessionpath}, time)
-    return sessionpath
-
-
-def save_search_config(options: SearchConfig):
-    with open(os.path.join(sessionpath, 'config.bin'), 'wb') as sessionexport:
-        pickle.dump(options, sessionexport)
+    with open(os.path.join(sessions_default_dir, f'{time}.created'), 'w') as f:
+        f.write('')

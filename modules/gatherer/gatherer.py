@@ -16,6 +16,7 @@ from modules.classes import *
 
 # region SETUP
 api_key = os.getenv('API_KEY') or ''
+SESSIONPATH = os.getenv('SESSIONPATH')
 # endregion
 
 
@@ -85,22 +86,22 @@ def _get_recipients_from_receipt(transaction_hash):
     return recipients, contract_address
 
 
-def follow_tokenflow_by_address(addresses: list, options: SearchConfig):
+def follow_tokenflow_by_address(address, options: SearchConfig):
     if options.contractFilter != '':
         _check_token(options.contractFilter)
 
-    if isinstance(addresses, list):
-        for addr in addresses.copy():
+    if isinstance(address, list):
+        for addr in address.copy():
             if not isinstance(addr, Address):
-                addresses.remove(addr)
-                addresses.append(Address(addr))
-    elif ',' in addresses:
-        addresses = [Address(address)
-                     for address in addresses.split(',')]
+                address.remove(addr)
+                address.append(Address(addr))
+    elif ',' in address:
+        address = [Address(address)
+                     for address in address.split(',')]
     else:
-        addresses = [Address(addresses)]
+        address = [Address(address)]
 
-    crawler.start_crawler_workers(addresses=addresses, options=options)
+    crawler.start_crawling(addresses=address, options=options)
 
 
 def follow_tokenflow_by_tx(transaction_hash: Hash, options: SearchConfig):
@@ -111,7 +112,7 @@ def follow_tokenflow_by_tx(transaction_hash: Hash, options: SearchConfig):
 
     _check_token(contract_address)
 
-    crawler.start_crawler_workers(addresses=recipients, options=options)
+    crawler.start_crawling(addresses=recipients, options=options)
 
 
 #def follow_tokenflow(by: SearchType, options: SearchOptions, tx=None, addresses=None):
@@ -124,9 +125,12 @@ def follow_tokenflow_by_tx(transaction_hash: Hash, options: SearchConfig):
 
 
 def follow_tokenflow(options: SearchConfig):
-    if options.search_by and len(options.search_by) == 66:
-        tx = Hash(tx)
-        follow_tokenflow_by_tx(transaction_hash=tx, options=options)
+    if options.search_by and isinstance(options.search_by, Hash):
+        follow_tokenflow_by_tx(transaction_hash=options.search_by, options=options)
 
-    if by == SearchType.ADDR and addresses:
-        follow_tokenflow_by_address(addresses=addresses, options=options)
+    if options.search_by and isinstance(options.search_by, Address):
+        follow_tokenflow_by_address(
+            address=options.search_by, options=options)
+        
+def continue_from_session():
+    crawler.resume_crawling()

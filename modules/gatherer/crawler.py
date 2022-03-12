@@ -1,10 +1,11 @@
 import _thread as thread
-from multiprocessing import Lock
+import threading
 import queue
 import time
+import sched
 import os
 import logging
-import inspect
+import pickle
 
 import modules.gatherer.api_functions as api
 from bscscan import BscScan
@@ -29,16 +30,52 @@ thread_timeout = int(_tto) if (_tto := os.getenv(
     'THREAD_TIMEOUT')) and _tto != '0' else None
 logging.debug(f'thread_timeout = {thread_timeout}')
 donotfollow = set()
+
+SESSIONPATH = os.getenv('SESSIONPATH')
+SNAPSHOT_TIME = int(_snap) if (_snap := os.getenv('SNAPSHOT_TIME')) else 15
+
+
+snapshot_lock = threading.Lock()
+threads_active = {}
+snapshot_schedule = sched.scheduler(time.time, time.sleep)
 # endregion
 
 
-def start_crawler_workers(addresses: list, options: SearchConfig):
-    with BscScan(api_key=api_key, asynchronous=False) as bsc:  # type: ignore
-        for address in addresses:
-            if not isinstance(address, Address):
-                address = Address(address)
-            _address_queue.put(address)
+def start_crawling(addresses, options: SearchConfig):
+    for address in addresses:
+        if not isinstance(address, Address):
+            address = Address(address)
+        _address_queue.put(address)
 
+    with open(os.path.join(SESSIONPATH, 'config.state'), 'wb') as file:
+        pickle.dump(options, file)
+
+    start_crawler_workers(options)
+
+    logging.info(
+        'Gathering missing native transactions for classification')
+    _get_missing_normal_transactions()
+
+
+def resume_crawling():
+    logging.info(
+        'restoring crawler state')
+    restore_state()
+
+    logging.info(
+        'restoring crawler config')
+    with open(os.path.join(SESSIONPATH, 'config.state'), 'rb') as file:
+        options = pickle.load(file)
+
+    start_crawler_workers(options)
+
+    logging.info(
+        'Gathering missing native transactions for classification')
+    _get_missing_normal_transactions()
+
+
+def start_crawler_workers(options: SearchConfig):
+    with BscScan(api_key=api_key, asynchronous=False) as bsc:  # type: ignore
         logging.info('Starting address filter thread')
         thread.start_new_thread(_filter_wallets, ("F0", thread_timeout))
 
@@ -59,19 +96,91 @@ def start_crawler_workers(addresses: list, options: SearchConfig):
         # TODO: while lock is active save (pickle) state of all queues and db's as snapshot
         # TODO: finally resume work
         time.sleep(10)
+
+        snapshot_schedule.run()
+        set_snapshot_timer(SNAPSHOT_TIME)
+
         while (_address_queue.qsize() + _api_queue.qsize() + _processing_queue.qsize()) > 0:
             time.sleep(1)
 
-        logging.info(
-            'Gathering missing native transactions for classification')
-        _get_missing_normal_transactions(bsc)
+        for item in snapshot_schedule.queue:
+            snapshot_schedule.cancel(item)
+
+        for threadid in threads_active:
+            threads_active[threadid]['termination_requested'] = True
+
+
+def set_snapshot_timer(minutes: int):
+    snapshot_schedule.enter((minutes*60), 1, save_state)
+
+
+def save_state():
+    logging.info('snapshot: acquiring lock')
+    snapshot_lock.acquire()
+
+    logging.info(
+        'snapshot: waiting for all tasks to reach pause state')
+    while any(k['running'] == True for k in threads_active):
+        time.sleep(1)
+
+    logging.info(
+        'snapshot: tasks paused, saving state')
+    with open(os.path.join(SESSIONPATH, 'address_queue.state'), 'wb') as file:
+        pickle.dump(_address_queue.queue.copy(), file)
+    with open(os.path.join(SESSIONPATH, 'api_queue.state'), 'wb') as file:
+        pickle.dump(_api_queue.queue.copy(), file)
+    with open(os.path.join(SESSIONPATH, 'processing_queue.state'), 'wb') as file:
+        pickle.dump(_processing_queue.queue.copy(), file)
+    gdb.crawldb.save()
+    gdb.save_crawler_db()
+
+    snapshot_lock.release()
+    set_snapshot_timer(SNAPSHOT_TIME)
+
+
+def restore_state():
+    logging.info('snapshot: acquiring lock')
+    snapshot_lock.acquire()
+
+    logging.info(
+        'snapshot: restoring state')
+
+    with open(os.path.join(SESSIONPATH, 'address_queue.state'), 'rb') as file:
+        list(map(_address_queue.put, pickle.load(file)))
+    with open(os.path.join(SESSIONPATH, 'api_queue.state'), 'rb') as file:
+        list(map(_api_queue.put, pickle.load(file)))
+    with open(os.path.join(SESSIONPATH, 'processing_queue.state'), 'rb') as file:
+        list(map(_processing_queue.put, pickle.load(file)))
+
+    gdb.crawldb.load()
+    gdb.load_crawler_db()
+
+    snapshot_lock.release()
+
+
+def snapshot_lock_handler(id, ThreadName):
+    logging.info(
+        f'{id} {ThreadName}: detected lock for snapshots. Waiting')
+    threads_active[thread.get_ident()] = False
+
+    while snapshot_lock.locked():
+        time.sleep(1)
+
+    logging.info(
+        f'{id} {ThreadName}: lock for snapshot cleared. Continue')
+    threads_active[thread.get_ident()] = True
 
 
 def _filter_wallets(ThreadName='', thread_timeout=None):
-    gdb.crawldb.clear()
+    id = thread.get_ident()
+    threads_active[id] = {'running': True, 'termination_requested': False}
 
-    while True:
+    while not threads_active[id]['termination_requested']:
+        if snapshot_lock.locked():
+            snapshot_lock_handler('wfilter', ThreadName)
+
         try:
+
             address = _address_queue.get(block=True, timeout=thread_timeout)
             logging.info(
                 f'wfilter {ThreadName}: got task {address} from queue')
@@ -91,8 +200,15 @@ def _filter_wallets(ThreadName='', thread_timeout=None):
 
 # TODO: change flow to request native transactions per wallet even with TrackConfig set to BEP20 to prevent excessive post-fetching
 def _retrieve_transactions(bsc: BscScan, options: SearchConfig, ThreadName='', thread_timeout=None):
+    id = thread.get_ident()
+    threads_active[id] = {
+        'running': True, 'termination_requested': False}
+
     # TODO: add bep721
-    while True:
+    while not threads_active[id]['termination_requested']:
+        if snapshot_lock.locked():
+            snapshot_lock_handler('gatherer', ThreadName)
+
         try:
             address = _api_queue.get(block=True, timeout=thread_timeout)
             logging.info(
@@ -125,8 +241,15 @@ def _retrieve_transactions(bsc: BscScan, options: SearchConfig, ThreadName='', t
 
 
 def _process_transactions(options: SearchConfig, ThreadName='', thread_timeout=None):
+    id = thread.get_ident()
+    threads_active[id] = {
+        'running': True, 'termination_requested': False}
+
     # TODO: add bep721
-    while True:
+    while not threads_active[id]['termination_requested']:
+        if snapshot_lock.locked():
+            snapshot_lock_handler('processor', ThreadName)
+
         try:
             workload = _processing_queue.get(
                 block=True, timeout=thread_timeout)
@@ -240,53 +363,54 @@ def _filter_transactions(options: SearchConfig, address, type, transactions):
     return {'in': incoming, 'out': outgoing, 'txid': tx_coll}
 
 
-def _get_missing_normal_transactions(bsc):
-    natTX = set()
-    bepTX = set()
+def _get_missing_normal_transactions():
+    with BscScan(api_key=api_key, asynchronous=False) as bsc:  # type: ignore
+        natTX = set()
+        bepTX = set()
 
-    wallets = gdb.walletDB.getall()
+        wallets = gdb.walletDB.getall()
 
-    if not wallets:
-        return
+        if not wallets:
+            return
 
-    for wallet in wallets:
-        natTX.update(wallet['txNAT'])
-        bepTX.update(wallet['txBEP'])
+        for wallet in wallets:
+            natTX.update(wallet['txNAT'])
+            bepTX.update(wallet['txBEP'])
 
-    missing_natTX = bepTX - natTX
+        missing_natTX = bepTX - natTX
 
-    number_missing = len(missing_natTX)
-    number_got = 0
+        number_missing = len(missing_natTX)
+        number_got = 0
 
-    logging.info(f'fetching {number_missing} missing native transactions')
-    for hash in missing_natTX:
-        tx = api.get_normal_transaction_by_hash(bsc, hash)
-        status = api.get_tx_status(bsc, hash)
+        logging.info(f'fetching {number_missing} missing native transactions')
+        for hash in missing_natTX:
+            tx = api.get_normal_transaction_by_hash(bsc, hash)
+            status = api.get_tx_status(bsc, hash)
 
-        gdb.native_insert({
-            "blockNumber": int(tx['blockNumber'], base=16),
-            "timeStamp": "",
-            "hash": tx['hash'],
-            "nonce": int(tx['nonce'], base=16),
-            "blockHash": tx['blockHash'],
-            "transactionIndex": int(tx['transactionIndex'], base=16),
-            "from": tx['from'],
-            "to": tx['to'],
-            "value": int(tx['value'], base=16),
-            "gas": int(tx['gas'], base=16),
-            "gasPrice": int(tx['gasPrice'], base=16),
-            "txreceipt_status": status['status'],
-            "input": tx['input'],
-            "contractAddress": "",
-            "cumulativeGasUsed": "",
-            "gasUsed": "",
-            "confirmations": ""
-        })
+            gdb.native_insert({
+                "blockNumber": int(tx['blockNumber'], base=16),
+                "timeStamp": "",
+                "hash": tx['hash'],
+                "nonce": int(tx['nonce'], base=16),
+                "blockHash": tx['blockHash'],
+                "transactionIndex": int(tx['transactionIndex'], base=16),
+                "from": tx['from'],
+                "to": tx['to'],
+                "value": int(tx['value'], base=16),
+                "gas": int(tx['gas'], base=16),
+                "gasPrice": int(tx['gasPrice'], base=16),
+                "txreceipt_status": status['status'],
+                "input": tx['input'],
+                "contractAddress": "",
+                "cumulativeGasUsed": "",
+                "gasUsed": "",
+                "confirmations": ""
+            })
 
-        number_got += 1
-        if not number_got % 10:
-            logging.info(
-                f'fetched {number_got}/{number_missing} missing native transactions')
+            number_got += 1
+            if not number_got % 10:
+                logging.info(
+                    f'fetched {number_got}/{number_missing} missing native transactions')
 
 
 def _identify_contract(bsc, address):
