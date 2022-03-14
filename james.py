@@ -65,6 +65,7 @@ if __name__ == "__main__":
 
     if resume:
         gatherer.continue_from_session()
+        processor.process_data()
     else:
         processor.pdb.transactionDB.clear()
         opt = SearchConfig(Direction.RIGHT,
@@ -76,7 +77,6 @@ if __name__ == "__main__":
 
     gatherer.gdb.save_crawler_db()
     processor.process_data()
-    processor.pdb.transactionDB.save(indent=0)
     # endregion
 
     ifmain_end = True

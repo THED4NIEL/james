@@ -49,12 +49,18 @@ def start_crawling(addresses, options: SearchConfig):
 
     with open(os.path.join(SESSIONPATH, 'config.state'), 'wb') as file:
         pickle.dump(options, file)
+    save_state()
 
     start_crawler_workers(options)
+
+    gdb.crawldb.clear()
+    gdb.crawldb.save()
+    gdb.save_crawler_db()
 
     logging.info(
         'Gathering missing native transactions for classification')
     _get_missing_normal_transactions()
+    gdb.save_crawler_db()
 
 
 def resume_crawling():
@@ -69,9 +75,14 @@ def resume_crawling():
 
     start_crawler_workers(options)
 
+    gdb.crawldb.clear()
+    gdb.crawldb.save()
+    gdb.save_crawler_db()
+
     logging.info(
         'Gathering missing native transactions for classification')
     _get_missing_normal_transactions()
+    gdb.save_crawler_db()
 
 
 def start_crawler_workers(options: SearchConfig):
@@ -92,9 +103,6 @@ def start_crawler_workers(options: SearchConfig):
                 _process_transactions, (options, f'P{n}', thread_timeout))
             _crawler_threads.append(t)
 
-        # TODO: create a lock every X minutes to prevent new entries to get pulled from queue
-        # TODO: while lock is active save (pickle) state of all queues and db's as snapshot
-        # TODO: finally resume work
         time.sleep(10)
 
         snapshot_schedule.run()
@@ -109,6 +117,9 @@ def start_crawler_workers(options: SearchConfig):
         for threadid in threads_active:
             threads_active[threadid]['termination_requested'] = True
 
+        while threads_active:
+            time.sleep(1)
+
 
 def set_snapshot_timer(minutes: int):
     snapshot_schedule.enter((minutes*60), 1, save_state)
@@ -120,7 +131,7 @@ def save_state():
 
     logging.info(
         'snapshot: waiting for all tasks to reach pause state')
-    while any(k['running'] == True for k in threads_active):
+    while any(threads_active[k]['running'] == True for k in threads_active):
         time.sleep(1)
 
     logging.info(
@@ -172,6 +183,7 @@ def snapshot_lock_handler(id, ThreadName):
 
 
 def _filter_wallets(ThreadName='', thread_timeout=None):
+    logging.info(f'wfilter {ThreadName}: thread started')
     id = thread.get_ident()
     threads_active[id] = {'running': True, 'termination_requested': False}
 
@@ -197,9 +209,13 @@ def _filter_wallets(ThreadName='', thread_timeout=None):
             logging.info(
                 f'wfilter {ThreadName}: finished task {address}')
 
+    threads_active.pop(id)
+    logging.info(f'wfilter {ThreadName}: thread ended')
+
 
 # TODO: change flow to request native transactions per wallet even with TrackConfig set to BEP20 to prevent excessive post-fetching
 def _retrieve_transactions(bsc: BscScan, options: SearchConfig, ThreadName='', thread_timeout=None):
+    logging.info(f'gatherer {ThreadName}: thread started')
     id = thread.get_ident()
     threads_active[id] = {
         'running': True, 'termination_requested': False}
@@ -239,8 +255,12 @@ def _retrieve_transactions(bsc: BscScan, options: SearchConfig, ThreadName='', t
             logging.info(
                 f'gatherer {ThreadName}: finished task {address}')
 
+    threads_active.pop(id)
+    logging.info(f'gatherer {ThreadName}: thread ended')
+
 
 def _process_transactions(options: SearchConfig, ThreadName='', thread_timeout=None):
+    logging.info(f'processor {ThreadName}: thread started')
     id = thread.get_ident()
     threads_active[id] = {
         'running': True, 'termination_requested': False}
@@ -294,6 +314,9 @@ def _process_transactions(options: SearchConfig, ThreadName='', thread_timeout=N
             _processing_queue.task_done()
             logging.info(
                 f'processor {ThreadName}: finished task {address}')
+
+    threads_active.pop(id)
+    logging.info(f'processor {ThreadName}: thread ended')
 
 
 # TODO: change flow to save native transactions per wallet even with TrackConfig set to BEP20 to prevent excessive post-fetching

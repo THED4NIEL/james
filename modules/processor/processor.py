@@ -274,7 +274,10 @@ def create_report_md():
 
 def process_data():
     join_transaction_data()
+    pdb.transactionDB.save()
+
     generate_missing_ABI_for_contractDB()
+    gdb.contractDB.save()
 
     contractdict = initialize_contracts()
     match_input_to_function(contractdict)
