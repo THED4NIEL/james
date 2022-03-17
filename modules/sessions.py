@@ -8,6 +8,8 @@ from modules.classes import SearchConfig
 sessions_base_dir = os.path.join('.', 'sessions')
 sessions_default_dir = os.path.join('.', 'sessions', 'current')
 
+if not os.path.exists(sessions_base_dir):
+    os.mkdir(sessions_base_dir)
 if not os.path.exists(sessions_default_dir):
     os.mkdir(sessions_default_dir)
 
