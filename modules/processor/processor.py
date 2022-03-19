@@ -190,7 +190,7 @@ def define_receiver(wallet, transaction):
     elif gdb.walletDB.exists(transaction['to']):
         return f'[{transaction["to"]}](#{transaction["to"]})'
     elif contract := gdb.contractDB.get(transaction['to']):
-        return f'[{contract["Name"]}</br>({transaction["to"]})](https://{BLOCK_EXPLORER}/address/{transaction["from"]})'
+        return f'[{contract["Name"]}</br>({transaction["to"]})](https://{BLOCK_EXPLORER}/address/{transaction["to"]})'
 
     else:
         return f'[{transaction["to"]}](https://{BLOCK_EXPLORER}/address/{transaction["to"]})'
