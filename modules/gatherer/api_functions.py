@@ -217,7 +217,7 @@ def transaction_crawler(func):
 
         while True:
             result = func(bsc, address, options, number_of_records,
-                          sort, page, startblock, startblock)
+                          sort, page, startblock, endblock)
 
             if ((Filter.Contract in options.filterBy or Filter.Contract_and_NativeTransfers in options.filterBy)
                     and Filter.Blocks in options.filterBy):
